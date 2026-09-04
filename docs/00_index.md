@@ -6,6 +6,7 @@ Read only the document relevant to the current task.
 
 - `specs/multi-video-sync-player-spec.md` — authoritative product specification and acceptance criteria.
 - `architecture/preimplementation-decisions.md` — frozen implementation-detail choices before source work.
+- `architecture/module-boundaries.md` — required module ownership, dependency direction, and file split/co-location rules for source-bearing work.
 - `research/existing-solutions.md` — prior art, reuse decisions, and wheel-reinvention guardrails.
 
 ## Implementation
@@ -30,4 +31,4 @@ Read only the document relevant to the current task.
 
 ## Current state
 
-Repository review is `validated`; no production source exists yet. The next source-bearing change should follow `.codex/next-task.md` rather than reopening architecture design.
+Repository review is `validated`; no production source exists yet. The next source-bearing change should follow `.codex/next-task.md`, including the required module responsibility map, rather than reopening architecture design.

@@ -1,0 +1,33 @@
+# Node / frontend
+node_modules/
+dist/
+coverage/
+.vite/
+
+# Tauri / Rust
+src-tauri/target/
+target/
+
+# IDE / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+*.user
+*.suo
+
+# Logs and generated artifacts
+*.log
+artifacts/
+.tmp/
+tmp/
+
+# Local test media and captures
+local-media/
+captures/
+*.mvsp.autosave
+
+# CodebaseMemory
+.codebase-memory/*
+!.codebase-memory/
+!.codebase-memory/graph.db.zst

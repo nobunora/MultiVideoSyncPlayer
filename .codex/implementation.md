@@ -8,7 +8,8 @@ Specification:
 
 Frozen implementation-detail decisions:
 
-`docs/architecture/preimplementation-decisions.md`
+- `docs/architecture/preimplementation-decisions.md`
+- `docs/architecture/module-boundaries.md`
 
 Implementation procedure:
 
@@ -27,6 +28,7 @@ Current first implementation cut:
 ## Preconditions
 
 - Read `AGENTS.md` first.
+- Read `docs/architecture/module-boundaries.md` before a source-bearing change.
 - The relevant repository-review disposition is `validated`.
 - Material specification conflicts are resolved.
 - Required Phase 0 technical spikes for the intended implementation cut are complete or explicitly included as the first bounded work in the PR.
@@ -43,17 +45,38 @@ If a precondition is false, stop implementation and report the blocker.
 2. Query CodebaseMemory for affected symbols/boundaries if an index exists; verify with source. Before the first meaningful source exists, absence of a graph is expected—do not create a fake empty graph.
 3. Re-read the relevant section of `docs/research/existing-solutions.md` before implementing a solved/general subsystem.
 4. Derive the smallest independently reviewable implementation cut from the approved plan/current task.
-5. State the reuse decision for each major subsystem before adding code/dependencies.
-6. Keep changes inside approved scope.
-7. Preserve local-only and Direct Local File invariants.
-8. Add focused tests with the implementation, starting with pure logic before UI/side-effect wiring.
-9. Run nearest checks first.
-10. Run broader lint/type/test/Rust/build checks according to risk.
-11. For media/timing changes, run the required real or generated media integration evidence; do not rely only on mocks.
-12. Inspect final diff, dependency changes, Tauri capabilities/CSP, and affected execution paths.
-13. Update `THIRD_PARTY_NOTICES.md` if third-party source is copied/derived or a notice obligation is introduced.
-14. Update implementation evidence in the PR/report.
-15. Once meaningful source exists, initialize/query CodebaseMemory before the next non-trivial source change. If a tracked `.codebase-memory/graph.db.zst` exists, refresh it once after source/rule changes are finalized and commit the generated artifact last.
+5. **Before writing implementation code, produce a concise module responsibility map for every touched/new module:** `owns`, `does not own`, `depends on`, `used by`, `test boundary`.
+6. Check the proposed dependency direction against `docs/architecture/module-boundaries.md`; remove accidental cycles and catch-all modules before implementation.
+7. State the reuse decision for each major subsystem before adding code/dependencies.
+8. Keep changes inside approved scope.
+9. Preserve local-only and Direct Local File invariants.
+10. Add focused tests with the implementation, starting with pure logic before UI/side-effect wiring.
+11. Run nearest checks first.
+12. Run broader lint/type/test/Rust/build checks according to risk.
+13. For media/timing changes, run the required real or generated media integration evidence; do not rely only on mocks.
+14. Inspect final diff, dependency changes, Tauri capabilities/CSP, affected execution paths, **module ownership, dependency direction, and file responsibility**.
+15. Split files when independent reasons to change/test are mixed; merge/co-locate trivial pieces when separation adds no boundary value. Do not use line count alone as a splitting rule.
+16. Update `THIRD_PARTY_NOTICES.md` if third-party source is copied/derived or a notice obligation is introduced.
+17. Update implementation evidence in the PR/report.
+18. Once meaningful source exists, initialize/query CodebaseMemory before the next non-trivial source change. If a tracked `.codebase-memory/graph.db.zst` exists, refresh it once after source/rule changes are finalized and commit the generated artifact last.
+
+## Module/file responsibility rule
+
+Treat module and file organization as part of correctness, not cleanup after implementation.
+
+Required:
+
+- one primary reason to change per file;
+- pure synchronization/project policy kept independent from React/Tauri/filesystem effects where practical;
+- UI expresses intent but does not reproduce synchronization math or native I/O;
+- Rust owns narrow trusted I/O/platform operations, not duplicate application business logic;
+- cross-feature imports use narrow stable contracts rather than another feature's internal implementation;
+- no circular dependencies between feature modules;
+- no generic dumping-ground `utils`, `helpers`, `common`, `services`, `manager`, or broad `filesystem` module;
+- no speculative abstraction or placeholder directory solely for future features;
+- no one-function/one-type file explosion unless ownership, reuse, testability, or reviewability clearly benefits.
+
+The normative ownership map and split/merge criteria are in `docs/architecture/module-boundaries.md`.
 
 ## Dependency rule
 
@@ -97,6 +120,7 @@ Report briefly but concretely:
 
 - implementation PR scope;
 - changed files and reasons;
+- **module responsibility map and any intentional boundary exceptions**;
 - reuse decisions;
 - dependencies added/removed and licensing notes;
 - CodebaseMemory queries/evidence used, if available;

@@ -10,6 +10,7 @@ Implement the first approved cut from:
 
 - `docs/specs/multi-video-sync-player-spec.md`
 - `docs/architecture/preimplementation-decisions.md`
+- `docs/architecture/module-boundaries.md`
 - `docs/implementation/initial-repository-review.md`
 - `docs/implementation/implementation-readiness.md`
 - `docs/testing/test-spec.md`
@@ -56,7 +57,45 @@ git --version
 
 Use Node 24 LTS and Rust stable when available.
 
-### 2. Scaffold
+### 2. Module responsibility preflight
+
+Before writing production implementation code, read `docs/architecture/module-boundaries.md` and write a concise responsibility map in the implementation notes/PR draft for every module expected in this first cut.
+
+For each module/path record:
+
+```text
+owns:
+does not own:
+depends on:
+used by:
+test boundary:
+```
+
+For the first PR, keep the source structure minimal. Do **not** create future `sync/`, `project/`, or other placeholder directories simply because the later architecture mentions them.
+
+Expected ownership is approximately:
+
+```text
+frontend app composition
+media source/playback adapter
+Canvas capture spike
+thin Tauri frontend adapter only if shared calls justify it
+Rust app/command wiring
+Rust media-file validation/scope/metadata
+Rust capture-byte output
+```
+
+Before implementation, reject or revise a proposed layout if it:
+
+- mixes React rendering with raw Tauri/filesystem logic;
+- mixes synchronization/product policy into native I/O;
+- creates circular feature imports;
+- creates a broad `utils`, `services`, `common`, `helpers`, `manager`, or catch-all `filesystem` module;
+- splits tiny one-use helpers/interfaces into separate files without a current ownership/testability benefit.
+
+Line count alone is not a file-splitting criterion. Split by independent reason to change, side-effect boundary, or materially different test strategy.
+
+### 3. Scaffold
 
 Use the official Tauri React + TypeScript + npm template.
 
@@ -71,7 +110,7 @@ Preserve all existing repository docs/contracts/license. Do not replace them wit
 
 Remove generator demo content after startup is proven.
 
-### 3. Keep dependencies minimal
+### 4. Keep dependencies minimal
 
 Allowed initially:
 
@@ -102,7 +141,7 @@ Do not add:
 - database;
 - E2E framework.
 
-### 4. Direct Local File proof
+### 5. Direct Local File proof
 
 Implement native multi-select for `.mp4`.
 
@@ -118,7 +157,7 @@ For selected files:
 
 Asset scope must stay narrow to exact user-selected files.
 
-### 5. Rust filesystem boundary
+### 6. Rust filesystem boundary
 
 Use narrow Rust commands/helpers where needed for:
 
@@ -129,7 +168,9 @@ Use narrow Rust commands/helpers where needed for:
 
 Do not grant general frontend filesystem access merely for convenience.
 
-### 6. Local-only CSP
+Keep `lib.rs` as wiring/registration. Do not let one generic `filesystem.rs` become the permanent owner of media authorization/metadata, project persistence, and capture output. In this first spike a tiny temporary co-location is acceptable only while the responsibilities are genuinely still one small concern; split when independent reasons to change appear.
+
+### 7. Local-only CSP
 
 Configure a restrictive CSP that permits only:
 
@@ -142,7 +183,7 @@ Do not allow general remote HTTP(S) origins.
 
 Do not add remote assets/fonts.
 
-### 7. Timing metadata spike
+### 8. Timing metadata spike
 
 Evaluate `shiguredo_mp4` on a representative H.264 MP4.
 
@@ -158,7 +199,7 @@ Do not infer exact CFR solely from average frame count divided by duration.
 
 If the candidate fails materially, remove it and document evidence before evaluating the next candidate from the architecture decision. Do not keep two parsers.
 
-### 8. Native capture spike
+### 9. Native capture spike
 
 For one paused/settled video:
 
@@ -170,7 +211,7 @@ For one paused/settled video:
 
 No final Capture UI is required.
 
-### 9. Drift measurement spike
+### 10. Drift measurement spike
 
 Create the smallest repeatable measurement mechanism for three videos.
 
@@ -196,7 +237,21 @@ Summarize median/p95/max absolute error.
 
 Do not implement the final drift correction controller in this PR.
 
-### 10. Tests/checks
+### 11. Boundary review before tests/final report
+
+Before declaring the implementation ready:
+
+- verify every changed file has one primary responsibility;
+- verify no module cycle exists;
+- verify UI does not own raw filesystem/Tauri or future synchronization policy;
+- verify Rust is a thin I/O/platform boundary, not duplicate business logic;
+- verify no speculative placeholder abstractions were introduced;
+- co-locate or remove abstractions that only forward calls and add no validation, ownership, testability, or platform boundary;
+- split any file that now mixes independently changing media, capture, UI, or native-I/O concerns.
+
+Record intentional exceptions in the PR responsibility map.
+
+### 12. Tests/checks
 
 Add focused unit/Rust tests with the code.
 
@@ -283,6 +338,7 @@ Open one focused implementation PR that contains:
 - focused tests;
 - exact checks and environment versions;
 - dependency/license/reuse table;
+- **module responsibility map and boundary review result**;
 - remaining evidence clearly marked;
 - no out-of-scope product features.
 

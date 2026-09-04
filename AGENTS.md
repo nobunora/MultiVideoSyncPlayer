@@ -47,6 +47,22 @@ Do not copy third-party code merely because it is visible. Verify license and pr
 - `NuerSir/multi_video_sync_ffplay` contains useful synchronization ideas and an MIT license file, but it is explicitly ffplay-derived; audit provenance before copying substantial code.
 - `ElizabethViera/multi-video-sync` has no license file in the repository as currently observed; use it as conceptual prior art only unless permission/licensing is established.
 
+## Module Boundaries and File Responsibilities
+
+Read `docs/architecture/module-boundaries.md` before the first source-bearing implementation and whenever a change crosses module boundaries.
+
+Before writing code for a non-trivial source-bearing PR:
+
+1. Identify the owning module for each requested behavior.
+2. Write a concise responsibility map in the implementation notes/PR description for touched/new modules: `owns`, `does not own`, `depends on`, `used by`, and `test boundary`.
+3. Check dependency direction and remove accidental cycles before implementation.
+4. Prefer the smallest existing module that cleanly owns the behavior; do not create a new layer merely for symmetry or future possibilities.
+5. Separate pure/domain policy from React/DOM/Tauri/filesystem side effects when they have different reasons to change or test strategies.
+6. Do not centralize unrelated behavior in catch-all `utils`, `helpers`, `services`, `common`, `manager`, or broad `filesystem` modules.
+7. Do not over-split cohesive code into one-function/one-type files without a concrete ownership, reuse, review, or testability benefit.
+
+Before finishing a source-bearing PR, verify that each changed file still has one primary responsibility, dependency direction remains understandable, and no UI/platform/domain boundary has been crossed for convenience. Record intentional exceptions.
+
 ## CodebaseMemory
 
 - Before proposing or implementing a code change, query CodebaseMemory for the target symbol, callers, callees, tests, and dependency boundary when an index exists.

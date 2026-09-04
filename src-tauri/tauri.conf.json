@@ -1,0 +1,46 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "MultiVideoSyncPlayer",
+  "version": "0.1.0",
+  "identifier": "io.nobunora.multivideosyncplayer",
+  "build": {
+    "beforeDevCommand": "npm run dev",
+    "devUrl": "http://localhost:1420",
+    "beforeBuildCommand": "npm run build",
+    "frontendDist": "../dist"
+  },
+  "app": {
+    "windows": [
+      {
+        "title": "MultiVideoSyncPlayer",
+        "width": 1280,
+        "height": 860,
+        "minWidth": 900,
+        "minHeight": 620
+      }
+    ],
+    "security": {
+      "csp": "default-src 'self'; connect-src 'self' ipc: http://ipc.localhost; media-src 'self' asset: http://asset.localhost blob:; img-src 'self' asset: http://asset.localhost blob: data:; script-src 'self'; style-src 'self' 'unsafe-inline';",
+      "assetProtocol": {
+        "enable": true,
+        "scope": []
+      }
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": "all",
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ],
+    "windows": {
+      "webviewInstallMode": {
+        "type": "offlineInstaller"
+      }
+    }
+  }
+}

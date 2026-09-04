@@ -6,6 +6,10 @@ Specification:
 
 `docs/specs/multi-video-sync-player-spec.md`
 
+Frozen implementation-detail decisions:
+
+`docs/architecture/preimplementation-decisions.md`
+
 Implementation procedure:
 
 `docs/implementation/implementation-plan.md`
@@ -14,22 +18,31 @@ Testing:
 
 - `docs/testing/test-spec.md`
 - `docs/testing/test-implementation-plan.md`
+- `docs/testing/acceptance-matrix.md`
+
+Current first implementation cut:
+
+`.codex/next-task.md`
 
 ## Preconditions
 
 - Read `AGENTS.md` first.
-- Repository-review disposition is `validated`.
+- The relevant repository-review disposition is `validated`.
 - Material specification conflicts are resolved.
 - Required Phase 0 technical spikes for the intended implementation cut are complete or explicitly included as the first bounded work in the PR.
+
+The initial greenfield repository review is recorded at:
+
+`docs/implementation/initial-repository-review.md`
 
 If a precondition is false, stop implementation and report the blocker.
 
 ## Required procedure
 
 1. Confirm current repository state still matches repository-review assumptions.
-2. Query CodebaseMemory for affected symbols/boundaries if an index exists; verify with source.
+2. Query CodebaseMemory for affected symbols/boundaries if an index exists; verify with source. Before the first meaningful source exists, absence of a graph is expected—do not create a fake empty graph.
 3. Re-read the relevant section of `docs/research/existing-solutions.md` before implementing a solved/general subsystem.
-4. Derive the smallest independently reviewable implementation cut from the approved plan.
+4. Derive the smallest independently reviewable implementation cut from the approved plan/current task.
 5. State the reuse decision for each major subsystem before adding code/dependencies.
 6. Keep changes inside approved scope.
 7. Preserve local-only and Direct Local File invariants.
@@ -40,7 +53,7 @@ If a precondition is false, stop implementation and report the blocker.
 12. Inspect final diff, dependency changes, Tauri capabilities/CSP, and affected execution paths.
 13. Update `THIRD_PARTY_NOTICES.md` if third-party source is copied/derived or a notice obligation is introduced.
 14. Update implementation evidence in the PR/report.
-15. If a tracked `.codebase-memory/graph.db.zst` exists, refresh it once after source/rule changes are finalized and commit the generated artifact last.
+15. Once meaningful source exists, initialize/query CodebaseMemory before the next non-trivial source change. If a tracked `.codebase-memory/graph.db.zst` exists, refresh it once after source/rule changes are finalized and commit the generated artifact last.
 
 ## Dependency rule
 
@@ -88,7 +101,7 @@ Report briefly but concretely:
 - dependencies added/removed and licensing notes;
 - CodebaseMemory queries/evidence used, if available;
 - exact checks run and outcomes;
-- specification acceptance criteria satisfied;
+- specification/acceptance-matrix criteria satisfied;
 - real media/manual evidence where required;
 - residual risks/known limitations;
 - unresolved questions;

@@ -2,7 +2,7 @@
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "MultiVideoSyncPlayer",
   "version": "0.1.0",
-  "identifier": "io.nobunora.multivideosyncplayer",
+  "identifier": "io.github.nobunora.multivideosyncplayer",
   "build": {
     "beforeDevCommand": "npm run dev",
     "devUrl": "http://localhost:1420",

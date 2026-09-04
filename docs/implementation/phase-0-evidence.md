@@ -1,21 +1,39 @@
 # Phase 0 Implementation Evidence
 
-This document records the bounded first implementation cut described in `.codex/next-task.md`. It is intentionally separate from the product specification; it records evidence and remaining manual checks.
+This document records the bounded first implementation cut described in `.codex/next-task.md`. It is intentionally separate from the product specification; it records evidence and remaining checks.
 
 ## Implemented paths
 
-- `src/media/local-file.ts` uses the official Tauri dialog plugin, retains the canonical source path, authorizes only that exact path, and creates a WebView2 asset URL with `convertFileSrc`.
-- `src-tauri/src/lib.rs` uses narrow `std::fs` commands for exact-file validation, capture writing, and `shiguredo_mp4` incremental range reads.
-- `src/capture/capture-frame.ts` creates a Canvas at `video.videoWidth × video.videoHeight`, draws the current frame, and returns PNG bytes for the Rust writer.
-- `src/sync/drift-measurement.ts` records monotonic sample time, global/master time, expected local time, actual local time, and signed error, then summarizes median/p95/max absolute error.
-- `src/App.tsx` provides up to four direct-file panes, local playback controls, per-file errors, native PNG capture, and a three-video measurement panel.
+- `src/media/local-file.ts` owns native MP4 selection plus the narrow prepare/timing IPC bridge and creates the WebView2 asset URL with `convertFileSrc`.
+- `src/media/media-controller.ts` is the imperative playback boundary around `HTMLVideoElement`; React orchestration does not directly issue seek/play/pause operations.
+- `src/capture/capture-frame.ts` creates a Canvas at `video.videoWidth × video.videoHeight`, draws the current frame, and returns PNG bytes.
+- `src/capture/capture-io.ts` owns capture path selection and the narrow PNG write IPC bridge.
+- `src-tauri/src/media_file.rs` owns exact-file validation/authorization and `shiguredo_mp4` timing inspection.
+- `src-tauri/src/capture_io.rs` owns PNG file creation/writing.
+- `src-tauri/src/lib.rs` contains Tauri module wiring and command registration only.
+- `src/sync/drift-measurement.ts` records and summarizes drift; aggregate Phase 0 statistics exclude the master stream.
+- `src/App.tsx` provides Phase 0 UI/orchestration for up to four direct-file panes, playback controls, native PNG capture, and three-video drift measurement.
+
+## Module responsibility map
+
+| Module | Owns | Does not own | Depends on | Used by | Test boundary |
+| --- | --- | --- | --- | --- | --- |
+| `src/App.tsx` | Phase 0 UI composition and orchestration | low-level seek/play/pause mechanics, filesystem writes, MP4 parsing | media/capture/sync adapters | application entry | behavior covered through pure adapter/sync tests plus manual UI acceptance |
+| `src/media/local-file.ts` | MP4 picker, exact-file preparation bridge, timing bridge, asset URL creation | playback policy, capture output | Tauri core/dialog | `App.tsx` | Rust media-file tests + manual picker/playback acceptance |
+| `src/media/media-controller.ts` | imperative HTML video playback adapter | sync policy, UI, filesystem | `HTMLVideoElement` | `App.tsx` | adapter contract; browser/WebView behavior remains manual Phase 0 evidence |
+| `src/capture/capture-frame.ts` | source-resolution Canvas PNG encoding | path selection, file writing | Canvas/video DOM APIs | `App.tsx` | Vitest source-dimension test |
+| `src/capture/capture-io.ts` | capture destination dialog and write IPC | PNG rendering, media parsing | Tauri core/dialog | `App.tsx` | Rust writer boundary + manual save acceptance |
+| `src/sync/drift-measurement.ts` | drift sample creation, slave-only aggregation, percentile summary | playback correction, UI | none | `App.tsx` | Vitest offset/statistics/master-exclusion tests |
+| `src-tauri/src/media_file.rs` | canonical path validation, exact asset authorization, MP4 range reads/timing inspection | capture I/O, Tauri app wiring | `std::fs`, Tauri asset scope, `shiguredo_mp4` | Tauri commands | Rust path/range/parser fixture tests |
+| `src-tauri/src/capture_io.rs` | create-new PNG output write | media validation/parsing | `std::fs`/`std::io` | Tauri command | manual save acceptance; narrow command surface |
+| `src-tauri/src/lib.rs` | Tauri builder/plugin/command registration | business logic and file-format logic | media/capture command modules | `main.rs` | compile/build boundary |
 
 ## Reuse decisions
 
 | Area | Decision |
 | --- | --- |
 | File picker | Reuse official Tauri dialog plugin |
-| Media playback | Reuse WebView2 `HTMLVideoElement` |
+| Media playback | Reuse WebView2 `HTMLVideoElement` behind `MediaController` |
 | File URL | Reuse Tauri asset protocol and `convertFileSrc` |
 | MP4 timing | Reuse `shiguredo_mp4` 2026.5.0 after synthetic CFR spike |
 | PNG encode | Reuse browser Canvas and `toDataURL("image/png")` |
@@ -26,7 +44,7 @@ This document records the bounded first implementation cut described in `.codex/
 
 Fixture: `tmp/phase0/synthetic-30fps.mp4`, generated with `scripts/generate-test-video.ps1` and FFmpeg 8.1.1 Essentials. The fixture is ignored and is not committed.
 
-Observed through `shiguredo_mp4` 2026.5.0:
+Previously observed through `shiguredo_mp4` 2026.5.0 before the review-fix commit:
 
 ```text
 video_track_count: 1
@@ -38,14 +56,15 @@ frame_duration_seconds: 0.03333333333333333
 cfr: true
 ```
 
-The implementation supplies only the ranges requested by the Sans-I/O demuxer and does not read the full video payload into memory. Target-camera/AKASO verification remains pending until a representative file is available.
+The parser is fed only requested ranges. A hard per-request safety limit of 64 MiB now rejects an unbounded or oversized `RequiredInput` instead of allocating the remaining multi-GB file. The synthetic fixture and target-camera parser checks must be rerun on the review-fix commit before the PR is marked ready.
 
 ## Capture and drift evidence
 
-- The Canvas unit test verifies that the output canvas dimensions are source dimensions, independent of displayed CSS size. Native WebView2 capture and saved-PNG dimension verification remain manual acceptance checks.
-- The measurement path is repeatable at a 250 ms interval and exposes the required sample fields and summary metrics. No real three-camera run has been performed in this environment; threshold selection and sustained drift characterization remain pending.
+- The Canvas unit test verifies that output dimensions use source video dimensions rather than displayed CSS size. Native WebView2 capture and saved-PNG dimension verification remain manual acceptance checks.
+- Drift aggregation now excludes Camera 1/master so the master cannot inject a zero-error sample into median/p95/max. A regression test covers master exclusion.
+- No real three-camera run has been performed on the review-fix commit; threshold selection and sustained drift characterization remain pending.
 
-## Environment and checks
+## Environment previously recorded
 
 ```text
 node v24.15.0
@@ -59,20 +78,28 @@ WebView2 runtime present
 FFmpeg 8.1.1 Essentials (developer fixture generation only)
 ```
 
-Checks run after the final source/configuration change:
+## Verification status after review fixes
 
-| Command | Result |
-| --- | --- |
-| `npm test -- --run` | PASS — 2 files, 4 tests |
-| `npm run typecheck` | PASS |
-| `npm run lint` | PASS |
-| `npm run build` | PASS |
-| `cargo test --manifest-path src-tauri/Cargo.toml` | PASS — 3 tests |
-| `cargo fmt --manifest-path src-tauri/Cargo.toml --all -- --check` | PASS |
-| `cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets --all-features -- -D warnings` | PASS |
-| `npm run tauri build` | PASS — MSI and NSIS x64 bundles |
+The earlier PR head passed the automated commands listed below, but those results are not claimed for the review-fix commit. Codex must rerun them on Windows after pulling the new head:
 
-`npm run tauri dev` reached Vite ready, compiled the Rust debug target, and launched `multivideosyncplayer.exe`; it was then stopped after startup smoke verification. Interactive local-file selection, WebView2 decoding, Canvas save, and three-camera measurements remain manual Windows acceptance work.
+```powershell
+npm test -- --run
+npm run typecheck
+npm run lint
+npm run build
+cargo test --manifest-path src-tauri/Cargo.toml
+cargo fmt --manifest-path src-tauri/Cargo.toml --all -- --check
+cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets --all-features -- -D warnings
+npm run tauri dev
+npm run tauri build
+```
+
+Manual acceptance delegated to Codex/Windows remains:
+
+- native multi-file selection and WebView2 decoding;
+- AKASO V50 Elite representative MP4 timing inspection;
+- saved PNG dimension verification;
+- three-camera play/pause/seek drift characterization.
 
 ## Scope exclusions
 

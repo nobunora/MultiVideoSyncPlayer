@@ -38,6 +38,19 @@ export function createDriftSamples(
   });
 }
 
+export function createSlaveDriftSamples(
+  sampleTimeMs: number,
+  globalTime: number,
+  masterVideoId: string,
+  videos: MeasurementVideo[],
+): DriftSample[] {
+  return createDriftSamples(
+    sampleTimeMs,
+    globalTime,
+    videos.filter((video) => video.id !== masterVideoId),
+  );
+}
+
 function percentile(sortedValues: number[], percentileValue: number): number {
   if (sortedValues.length === 0) return 0;
   const index = (sortedValues.length - 1) * percentileValue;

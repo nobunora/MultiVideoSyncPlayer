@@ -1,5 +1,5 @@
 import { convertFileSrc, invoke } from "@tauri-apps/api/core";
-import { open, save } from "@tauri-apps/plugin-dialog";
+import { open } from "@tauri-apps/plugin-dialog";
 
 export interface PreparedVideoFile {
   path: string;
@@ -44,16 +44,4 @@ export async function prepareVideoFile(path: string): Promise<PreparedVideoFile>
 
 export function inspectMp4Timing(path: string): Promise<Mp4TimingInfo> {
   return invoke<Mp4TimingInfo>("inspect_mp4_timing", { path });
-}
-
-export async function chooseCapturePath(defaultPath: string): Promise<string | null> {
-  const selected = await save({
-    defaultPath,
-    filters: [{ name: "PNG image", extensions: ["png"] }],
-  });
-  return selected;
-}
-
-export function writeCapturePng(path: string, bytes: number[]): Promise<void> {
-  return invoke("write_capture_png", { path, bytes });
 }

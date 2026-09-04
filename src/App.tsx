@@ -1,16 +1,24 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import "./App.css";
 import { captureCurrentFrame } from "./capture/capture-frame";
+import { chooseCapturePath, writeCapturePng } from "./capture/capture-io";
 import {
-  chooseCapturePath,
   inspectMp4Timing,
   prepareVideoFile,
   selectVideoPaths,
-  writeCapturePng,
   type Mp4TimingInfo,
   type PreparedVideoFile,
 } from "./media/local-file";
-import { createDriftSamples, DriftRecorder, summarizeDrift, type DriftSummary } from "./sync/drift-measurement";
+import {
+  HtmlVideoController,
+  type MediaController,
+} from "./media/media-controller";
+import {
+  createSlaveDriftSamples,
+  DriftRecorder,
+  summarizeDrift,
+  type DriftSummary,
+} from "./sync/drift-measurement";
 
 interface VideoAsset extends PreparedVideoFile {
   id: string;
@@ -29,6 +37,7 @@ interface LoadError {
 
 const SAMPLE_INTERVAL_MS = 250;
 const MAX_VIDEOS = 4;
+const PRE_PLAY_SEEK_TOLERANCE_SECONDS = 0.1;
 
 function fileNameFromPath(path: string): string {
   const parts = path.split(/[\\/]/);
@@ -48,6 +57,7 @@ function App() {
   const [driftSummary, setDriftSummary] = useState<DriftSummary>(() => summarizeDrift([]));
   const [message, setMessage] = useState("Ready for local MP4 files.");
   const videoRefs = useRef<Record<string, HTMLVideoElement | null>>({});
+  const mediaControllers = useRef<Record<string, MediaController | null>>({});
   const recorder = useRef(new DriftRecorder());
 
   const maxDuration = useMemo(
@@ -111,21 +121,24 @@ function App() {
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "The native file picker failed.");
     }
-  }, [assets.length, updateAsset]);
+  }, [assets.length]);
 
   const pauseAll = useCallback(() => {
-    Object.values(videoRefs.current).forEach((video) => video?.pause());
+    Object.values(mediaControllers.current).forEach((controller) => controller?.pause());
     setIsPlaying(false);
   }, []);
 
   const playAll = useCallback(async () => {
-    const masterTime = videoRefs.current[assets[0]?.id ?? ""]?.currentTime ?? globalTime;
+    const masterController = mediaControllers.current[assets[0]?.id ?? ""];
+    const masterTime = masterController?.getCurrentTime() ?? globalTime;
     const results = await Promise.allSettled(
       assets.map(async (asset) => {
-        const video = videoRefs.current[asset.id];
-        if (!video) return;
-        if (Math.abs(video.currentTime - masterTime) > 0.1) video.currentTime = masterTime;
-        await video.play();
+        const controller = mediaControllers.current[asset.id];
+        if (!controller) return;
+        if (Math.abs(controller.getCurrentTime() - masterTime) > PRE_PLAY_SEEK_TOLERANCE_SECONDS) {
+          await controller.seek(masterTime);
+        }
+        await controller.play();
       }),
     );
     const rejected = results.filter((result) => result.status === "rejected");
@@ -135,10 +148,11 @@ function App() {
 
   const seekAll = useCallback((target: number) => {
     setGlobalTime(target);
-    assets.forEach((asset) => {
-      const video = videoRefs.current[asset.id];
-      if (video) video.currentTime = Math.min(target, video.duration || target);
+    const seeks = assets.map((asset) => {
+      const controller = mediaControllers.current[asset.id];
+      return controller ? controller.seek(target) : Promise.resolve();
     });
+    void Promise.allSettled(seeks);
   }, [assets]);
 
   const capture = useCallback(async (asset: VideoAsset) => {
@@ -161,15 +175,16 @@ function App() {
     if (!isMeasuring) return;
     const handle = window.setInterval(() => {
       const master = assets[0];
-      const masterVideo = master ? videoRefs.current[master.id] : null;
-      if (!masterVideo) return;
-      const samples = createDriftSamples(
+      const masterController = master ? mediaControllers.current[master.id] : null;
+      if (!master || !masterController) return;
+      const samples = createSlaveDriftSamples(
         performance.now(),
-        masterVideo.currentTime,
+        masterController.getCurrentTime(),
+        master.id,
         assets.map((asset) => ({
           id: asset.id,
           offsetSeconds: 0,
-          actualLocalTime: videoRefs.current[asset.id]?.currentTime ?? Number.NaN,
+          actualLocalTime: mediaControllers.current[asset.id]?.getCurrentTime() ?? Number.NaN,
         })),
       );
       recorder.current.record(samples);
@@ -244,7 +259,10 @@ function App() {
                 <span className="file-state">DIRECT FILE</span>
               </div>
               <video
-                ref={(element) => { videoRefs.current[asset.id] = element; }}
+                ref={(element) => {
+                  videoRefs.current[asset.id] = element;
+                  mediaControllers.current[asset.id] = element ? new HtmlVideoController(element) : null;
+                }}
                 src={asset.sourceUrl}
                 controls
                 playsInline
@@ -277,7 +295,7 @@ function App() {
         <div>
           <p className="eyebrow">PHASE 0 SPIKE</p>
           <h2>Three-video drift measurement</h2>
-          <p>Samples every {SAMPLE_INTERVAL_MS} ms against Camera 1 as the master. Use play, pause/resume, and the timeline seek while recording.</p>
+          <p>Samples every {SAMPLE_INTERVAL_MS} ms against Camera 1 as the master. Aggregate statistics include slave streams only.</p>
         </div>
         <div className="measurement-actions">
           <button type="button" onClick={() => setIsMeasuring((current) => !current)} disabled={assets.length < 3}>

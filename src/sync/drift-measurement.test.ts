@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { createDriftSamples, summarizeDrift } from "./drift-measurement";
+import {
+  createDriftSamples,
+  createSlaveDriftSamples,
+  summarizeDrift,
+} from "./drift-measurement";
 
 describe("drift measurement", () => {
   it("maps global time to expected local time using the frozen offset sign", () => {
@@ -9,6 +13,17 @@ describe("drift measurement", () => {
 
     expect(sample.expectedLocalTime).toBe(10);
     expect(sample.errorSeconds).toBeCloseTo(0.25);
+  });
+
+  it("excludes the master stream from aggregate drift samples", () => {
+    const samples = createSlaveDriftSamples(250, 12, "camera-a", [
+      { id: "camera-a", offsetSeconds: 0, actualLocalTime: 12 },
+      { id: "camera-b", offsetSeconds: 0, actualLocalTime: 12.03 },
+      { id: "camera-c", offsetSeconds: 0, actualLocalTime: 11.98 },
+    ]);
+
+    expect(samples.map((sample) => sample.videoId)).toEqual(["camera-b", "camera-c"]);
+    expect(summarizeDrift(samples).sampleCount).toBe(2);
   });
 
   it("summarizes median, p95, and maximum absolute error", () => {

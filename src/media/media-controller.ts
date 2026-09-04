@@ -19,21 +19,36 @@ export class HtmlVideoController implements MediaController {
   }
 
   seek(time: number): Promise<void> {
+    if (!Number.isFinite(time)) {
+      return Promise.reject(new Error("Seek target must be finite."));
+    }
+
+    const duration = this.video.duration;
+    const target = Math.max(
+      0,
+      Number.isFinite(duration) ? Math.min(time, duration) : time,
+    );
+    if (Math.abs(this.video.currentTime - target) < 0.0005) {
+      return Promise.resolve();
+    }
+
     return new Promise((resolve, reject) => {
-      const onSeeked = () => {
+      const cleanup = () => {
         this.video.removeEventListener("seeked", onSeeked);
         this.video.removeEventListener("error", onError);
+      };
+      const onSeeked = () => {
+        cleanup();
         resolve();
       };
       const onError = () => {
-        this.video.removeEventListener("seeked", onSeeked);
-        this.video.removeEventListener("error", onError);
+        cleanup();
         reject(new Error("The video seek failed."));
       };
 
       this.video.addEventListener("seeked", onSeeked, { once: true });
       this.video.addEventListener("error", onError, { once: true });
-      this.video.currentTime = Math.max(0, time);
+      this.video.currentTime = target;
     });
   }
 

@@ -12,7 +12,7 @@ const MAX_PARSER_INPUT_BYTES: u64 = 64 * 1024 * 1024;
 
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
-struct PreparedVideoFile {
+pub(crate) struct PreparedVideoFile {
     path: String,
     file_name: String,
     size_bytes: u64,
@@ -20,7 +20,7 @@ struct PreparedVideoFile {
 
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
-struct Mp4TimingInfo {
+pub(crate) struct Mp4TimingInfo {
     video_track_count: usize,
     codec: String,
     duration_seconds: f64,

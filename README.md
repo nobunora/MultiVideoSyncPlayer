@@ -31,12 +31,40 @@ See `THIRD_PARTY_NOTICES.md` for attribution and licensing notes.
 ## Project documents
 
 - Product specification: `docs/specs/multi-video-sync-player-spec.md`
+- Frozen pre-implementation decisions: `docs/architecture/preimplementation-decisions.md`
 - Implementation procedure: `docs/implementation/implementation-plan.md`
+- Validated initial repository review: `docs/implementation/initial-repository-review.md`
+- Implementation readiness checklist: `docs/implementation/implementation-readiness.md`
 - Test specification: `docs/testing/test-spec.md`
 - Test implementation procedure: `docs/testing/test-implementation-plan.md`
+- Acceptance matrix: `docs/testing/acceptance-matrix.md`
 - Codex rules: `AGENTS.md` and `.codex/`
+- Next Codex task: `.codex/next-task.md`
 - CodebaseMemory rules: `docs/15_codebase_memory_and_quality.md`
+
+## Implementation baseline
+
+The current accepted v1 baseline is:
+
+- Windows 10/11 x64;
+- Node 24 LTS + npm;
+- Tauri 2.11.x;
+- React + TypeScript + Vite;
+- WebView2 media playback;
+- Direct Local File through Tauri asset protocol;
+- narrow Rust `std::fs`/I/O commands instead of broad frontend filesystem access;
+- `shiguredo_mp4` as the first MP4 timing metadata parser candidate;
+- Canvas PNG capture, no FFmpeg runtime;
+- no updater/cloud/analytics/network plugin;
+- `.mvsp` versioned JSON projects;
+- offline WebView2 installer for release packaging.
+
+These choices are explained in `docs/architecture/preimplementation-decisions.md`.
 
 ## Status
 
-Specification and implementation planning phase.
+**Implementation-ready.**
+
+The specification is approved, repository review disposition is `validated`, architecture decisions are frozen, and the first bounded Codex implementation task is written in `.codex/next-task.md`.
+
+No production source has been implemented yet. The next change should be the first source-bearing PR, not another architecture redesign.

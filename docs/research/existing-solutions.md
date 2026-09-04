@@ -153,26 +153,122 @@ Possible future research only if users later require automatic alignment.
 
 ---
 
-## 6. Platform primitives to reuse before custom code
+## 6. shiguredo_mp4
+
+Repository: https://github.com/shiguredo/mp4-rs  
+Crate: `shiguredo_mp4`  
+Observed release during 2026-09-04 research: 2026.5.0  
+License: Apache-2.0
+
+### Why it is relevant
+
+MultiVideoSyncPlayer needs MP4 track/sample timing for reliable CFR/frame-step classification, but does not need a custom decoder.
+
+`shiguredo_mp4` is a strong first candidate because it is:
+
+- actively released in 2026;
+- written in Rust, matching the Tauri local-file boundary;
+- zero-dependency at crate level according to current package documentation;
+- Windows compatible;
+- H.264/AVC MP4 aware;
+- capable of exposing track and media-sample timing;
+- Sans-I/O/incremental, allowing the application to read only file ranges requested by the parser rather than loading a multi-gigabyte video into memory.
+
+References:
+
+- https://docs.rs/crate/shiguredo_mp4/latest
+- https://docs.rs/shiguredo_mp4/latest/shiguredo_mp4/demux/
+
+### Reuse decision
+
+**First Phase 0 metadata parser candidate.**
+
+Keep it as a runtime dependency only if a representative target MP4 proves that its API can determine the required timing/CFR information cleanly. If it fails, remove it before adding another parser.
+
+Apache-2.0 notice/license obligations must be reflected in third-party notices if the crate becomes a shipped dependency.
+
+---
+
+## 7. mp4box.js
+
+Repository: https://github.com/gpac/mp4box.js  
+Package: `mp4box`  
+Observed version during 2026-09-04 research: 2.4.1  
+License: BSD-3-Clause
+
+### Useful capability
+
+It is a mature JavaScript ISO-BMFF/MP4 parser and can expose track/sample metadata.
+
+### Why it is not the first choice
+
+The application already needs a Rust boundary for direct local file I/O. Making the browser/WebView parse MP4 metadata would either require:
+
+- moving chunks of large local files through frontend plumbing; or
+- maintaining a second file-access path in the WebView.
+
+That is unnecessary unless the Rust parser candidates fail.
+
+### Reuse decision
+
+Fallback metadata parser candidate, not a default dependency.
+
+---
+
+## 8. Other Rust MP4 parser fallbacks
+
+### re_mp4
+
+Repository: https://github.com/rerun-io/re_mp4  
+License: MIT.
+
+Current research indicates active 2026 releases. It is a possible fallback if the first parser cannot satisfy the exact sample-timing requirement.
+
+### mp4 / mp4-rust
+
+Repository: https://github.com/alfg/mp4-rust  
+Crate: `mp4`  
+License: MIT.
+
+A stable ISO-MP4 reader/writer with straightforward file-reader APIs. Its current public version observed in research is older than the preferred candidate, so it is a fallback rather than the first choice.
+
+### Reuse decision
+
+Evaluate one parser at a time. Do not accumulate multiple parser dependencies in the product.
+
+---
+
+## 9. Platform primitives to reuse before custom code
 
 The implementation should prefer existing platform/runtime primitives:
 
-- Tauri official dialog/filesystem capabilities for native file selection and local save/open flows;
+- official Tauri dialog plugin for native file selection;
+- Tauri asset protocol + `convertFileSrc` for exact local video playback in WebView2;
+- narrow Rust `std::fs`/`std::io` helpers for application-owned filesystem operations;
 - HTML5 `<video>` / WebView2 media decoding for supported MP4/H.264 playback;
 - `requestVideoFrameCallback` where useful for displayed-frame timing;
-- Canvas for native-dimension current-frame capture if validation confirms it is reliable for Tauri local media;
+- Canvas for native-dimension current-frame capture;
+- Canvas composition for clean multi-video capture before a DOM screenshot dependency is considered;
 - JSON for project persistence;
 - CSS Grid/flex layout for split video presentation;
 - browser monotonic timing (`performance.now`) and media `currentTime` rather than implementing a timer framework;
 - standard React state primitives unless measured complexity justifies a dedicated state library.
 
-## 7. Dependencies requiring a deliberate evaluation
+## 10. Deliberately avoided dependencies
 
-Do not implement an MP4 parser from scratch merely to obtain frame-rate/sample metadata. During the implementation spike, compare maintained media metadata/demux options (for example an MP4 parser or MediaInfo-family library) and select the smallest option that provides the required CFR/fps information on Windows/Tauri.
+Do not bundle FFmpeg solely for functionality already reliably available from WebView2 and an MP4 metadata parser. FFmpeg may be used as a development/test-video generator without becoming a runtime dependency.
 
-Do not bundle FFmpeg solely for functionality already reliably available from WebView2. FFmpeg may be used as a development/test-video generator without becoming a runtime dependency.
+Do not initially add:
 
-## 8. Mandatory pre-implementation check
+- general UI framework;
+- state management framework;
+- schema-validation framework;
+- DOM screenshot framework;
+- database;
+- HTTP/updater/cloud SDK;
+- multiple MP4 parser libraries.
+
+## 11. Mandatory pre-implementation check
 
 For each major work item in `docs/implementation/implementation-plan.md`, the repository agent must state one of:
 

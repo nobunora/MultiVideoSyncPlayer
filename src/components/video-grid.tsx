@@ -80,6 +80,7 @@ export function VideoGrid({
               </div>
               <video
                 ref={(element) => onVideoElement(asset.id, element)}
+                crossOrigin="anonymous"
                 src={asset.sourceUrl}
                 controls
                 playsInline

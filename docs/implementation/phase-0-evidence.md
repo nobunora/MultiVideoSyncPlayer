@@ -118,14 +118,14 @@ npm run tauri dev
 npm run tauri build
 ```
 
-Current results on source head `3346129`: focused drift/synchronized-playback suites passed (17 tests), the full TypeScript suite passed (22 tests), 7 Rust tests passed, typecheck/lint/build/fmt/clippy passed, Tauri dev reached Vite ready and Rust debug application launch, and `npm run tauri build` produced both MSI and NSIS installers:
+Current results on source head `c0fb0c1`: the focused drift/range and synchronized-playback suites passed (19 tests), the full TypeScript suite passed (24 tests), typecheck/lint/build passed, Tauri dev reached Vite ready and Rust debug application launch, and `npm run tauri build` produced both MSI and NSIS installers. Rust 7-test, fmt, and clippy evidence is retained from `c9b6292` because this head changes only TypeScript range calculation/UI; the Rust/parser/capture-native paths are unchanged:
 
 - `src-tauri/target/release/bundle/msi/MultiVideoSyncPlayer_0.1.0_x64_en-US.msi`
 - `src-tauri/target/release/bundle/nsis/MultiVideoSyncPlayer_0.1.0_x64-setup.exe`
 
 The reused fixture evidence is `avc1`, 3.0 seconds, timescale 15360, 90 samples, 0.03333333333333333 seconds/frame, CFR. The Rust test run emitted only the existing non-fatal Windows linker stdout warning. No CI/status checks are published for this repository.
 
-Quick-use gate: **USABLE ALPHA.** With Windows WebView2 and the native picker, three ignored synthetic local MP4s were opened without copying. Deliberate local positions were set to A=1.2 s, B=0.8 s, C=0.5 s; measurement was started; Play all and Pause all completed; then Global Seek was set to G=2.204 s. The observed settled positions were A=2.204 s, B=1.804 s, C=1.504 s, preserving offsets 0 / -0.4 / -0.7 rather than normalizing the cameras. Measurement remained resumable, and native PNG capture saved `tmp/phase0/gui-capture-fixed.png` as 1280×720 RGBA PNG. The initial tainted-Canvas failure was fixed by `crossOrigin="anonymous"` and the flow was rerun successfully.
+Quick-use gate: **USABLE ALPHA — current head `c0fb0c1`.** With Windows WebView2 and the native picker, three ignored synthetic local MP4s of unequal duration (A=8 s, B=5 s, C=7 s) were opened without copying. Before a baseline, the GUI displayed usable range `0.000–5.000 s`, proving it uses the shortest duration. After setting A=1.2 s, B=0.8 s, C=0.5 s and starting measurement, it displayed the aligned range `0.700–5.400 s`. Global Seek at the upper edge settled at A=5.400 s, B=5.000 s, C=4.700 s; all mapped targets stayed in range and the slider did not expose a value above 5.400 s. A follow-up in-range seek settled at A=2.566 s, B=2.166 s, C=1.866 s, and Play all/Pause all completed. `Resume measurement` remained available after the seek. The previously verified native PNG result remains valid from `c9b6292`; this range-only head did not change capture code.
 
 The fixture command used for this run was:
 

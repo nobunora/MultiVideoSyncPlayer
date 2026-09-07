@@ -48,9 +48,9 @@ This document records the bounded first implementation cut described in `.codex/
 
 ## Synthetic MP4 timing spike
 
-Fixture: `tmp/phase0/synthetic-30fps.mp4`, generated with `scripts/generate-test-video.ps1` and FFmpeg 8.1.1 Essentials. The fixture is ignored and is not committed.
+Fixture: `tmp/phase0/synthetic-30fps-fbd7b9e.mp4`, generated with `scripts/generate-test-video.ps1` and FFmpeg 8.1.1 Essentials. The fixture is ignored and is not committed.
 
-Last verified result before the latest correctness-hardening change:
+Current latest correctness-hardening result (`fbd7b9e`):
 
 ```text
 video_track_count: 1
@@ -62,7 +62,7 @@ frame_duration_seconds: 0.03333333333333333
 cfr: true
 ```
 
-The parser is fed only requested ranges. A hard per-request safety limit of 64 MiB rejects an unbounded or oversized `RequiredInput` instead of allocating the remaining multi-GB file. Regenerate and reparse the fixture on the new head before Ready review.
+The fixture was regenerated on the current Windows head with an explicit ignored output path and parsed through the targeted Rust test with `MVSP_PHASE0_FIXTURE`. The parser is fed only requested ranges. A hard per-request safety limit of 64 MiB rejects an unbounded or oversized `RequiredInput` instead of allocating the remaining multi-GB file.
 
 ## Capture and drift evidence
 
@@ -92,9 +92,9 @@ WebView2 runtime present
 FFmpeg 8.1.1 Essentials (developer fixture generation only)
 ```
 
-## Verification required after latest correctness hardening
+## Verification status after latest correctness hardening
 
-The `df0e8ba` head passed 13 TypeScript tests, 7 Rust tests, typecheck/lint/build/fmt/clippy, Tauri dev startup, regenerated synthetic MP4 parsing, and MSI/NSIS packaging. Those results are historical only after the latest source changes and must not be inherited as current-head evidence.
+The `df0e8ba` results were treated as historical. The complete verification set was rerun on `fbd7b9e` after the paused-baseline, playback-state, measurement-control, range-validation, empty-participant, and shared-drift-sampling hardening.
 
 Run on Windows from the repository root:
 
@@ -111,15 +111,20 @@ npm run tauri dev
 npm run tauri build
 ```
 
-Then regenerate and parse the synthetic fixture on the same head:
+Then regenerate and parse the synthetic fixture on the same head. An explicit ignored output path avoids reusing an existing fixture:
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File scripts/generate-test-video.ps1
-$env:MVSP_PHASE0_FIXTURE = (Resolve-Path "tmp/phase0/synthetic-30fps.mp4").Path
+powershell -ExecutionPolicy Bypass -File scripts/generate-test-video.ps1 -OutputPath "tmp/phase0/synthetic-30fps-fbd7b9e.mp4"
+$env:MVSP_PHASE0_FIXTURE = (Resolve-Path "tmp/phase0/synthetic-30fps-fbd7b9e.mp4").Path
 & "$env:USERPROFILE\.cargo\bin\cargo.exe" test --manifest-path src-tauri/Cargo.toml validates_phase0_fixture_when_requested -- --nocapture
 ```
 
-Record the exact TypeScript/Rust test counts and all command outcomes. The newly added controller/coordinator range checks should increase the TypeScript test count above the previously recorded 13; record the actual result rather than assuming a fixed count.
+Current results on `fbd7b9e`: focused controller/coordinator tests passed (10 tests), the full TypeScript suite passed (17 tests), 7 Rust tests passed, typecheck/lint/build/fmt/clippy passed, Tauri dev reached Vite ready and Rust debug application launch, and the regenerated fixture parsed as `avc1`, 3.0 seconds, 15360 timescale, 90 samples, 0.03333333333333333 seconds/frame, CFR. `npm run tauri build` produced both installers:
+
+- `src-tauri/target/release/bundle/msi/MultiVideoSyncPlayer_0.1.0_x64_en-US.msi`
+- `src-tauri/target/release/bundle/nsis/MultiVideoSyncPlayer_0.1.0_x64-setup.exe`
+
+The Rust test run emitted only the existing non-fatal Windows linker stdout warning. No CI/status checks are published for this repository.
 
 Manual acceptance delegated to Windows remains:
 

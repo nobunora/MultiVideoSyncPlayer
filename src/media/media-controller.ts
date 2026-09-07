@@ -25,10 +25,11 @@ export class HtmlVideoController implements MediaController {
     }
 
     const duration = this.video.duration;
-    const target = Math.max(
-      0,
-      Number.isFinite(duration) ? Math.min(time, duration) : time,
-    );
+    if (time < 0 || (Number.isFinite(duration) && time > duration)) {
+      return Promise.reject(new Error("Seek target is outside the playable media range."));
+    }
+
+    const target = time;
     if (Math.abs(this.video.currentTime - target) < 0.0005 && !this.video.seeking) {
       return Promise.resolve();
     }

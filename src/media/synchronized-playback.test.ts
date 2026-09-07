@@ -12,7 +12,11 @@ function deferred<T = void>(): { promise: Promise<T>; resolve: (value: T) => voi
   return { promise, resolve, reject };
 }
 
-function fakeController(currentTime: number, seekOperation: Promise<void>): MediaController & {
+function fakeController(
+  currentTime: number,
+  seekOperation: Promise<void>,
+  duration = 30,
+): MediaController & {
   playCalls: number;
   pauseCalls: number;
   seekTargets: number[];
@@ -25,7 +29,7 @@ function fakeController(currentTime: number, seekOperation: Promise<void>): Medi
 
   return {
     getCurrentTime: () => currentTime,
-    getDuration: () => 30,
+    getDuration: () => duration,
     seek: (targetTime) => {
       state.seekTargets.push(targetTime);
       return seekOperation;
@@ -165,5 +169,29 @@ describe("synchronized playback", () => {
     ).rejects.toThrow("finite non-negative");
     expect(controller.seekTargets).toEqual([]);
     expect(controller.playCalls).toBe(0);
+  });
+
+  it("rejects an empty participant set", async () => {
+    await expect(startSynchronizedPlayback([], 0.1)).rejects.toThrow("At least one playback participant");
+  });
+
+  it("rejects an out-of-range participant target before any participant seeks or plays", async () => {
+    const valid = fakeController(0, Promise.resolve(), 30);
+    const outOfRange = fakeController(0, Promise.resolve(), 10);
+
+    await expect(
+      startSynchronizedPlayback(
+        [
+          { id: "camera-a", controller: valid, targetTime: 5 },
+          { id: "camera-b", controller: outOfRange, targetTime: 10.5 },
+        ],
+        0.1,
+      ),
+    ).rejects.toThrow("outside the playable media range");
+
+    expect(valid.seekTargets).toEqual([]);
+    expect(outOfRange.seekTargets).toEqual([]);
+    expect(valid.playCalls).toBe(0);
+    expect(outOfRange.playCalls).toBe(0);
   });
 });

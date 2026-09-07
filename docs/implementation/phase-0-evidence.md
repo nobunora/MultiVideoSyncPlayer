@@ -5,8 +5,8 @@ This document records the bounded first implementation cut described in `.codex/
 ## Implemented paths
 
 - `src/platform/tauri-media.ts` owns native MP4 selection, exact-file IPC, timing IPC, and asset URL creation through the Tauri APIs; Phase 0 orchestration uses this explicit adapter directly.
-- `src/media/media-controller.ts` is the imperative playback boundary around `HTMLVideoElement`; it reports active seeks and waits for `seeked` even when the target time is already current.
-- `src/media/synchronized-playback.ts` coordinates the two-phase synchronized start: every participant supplies an explicit local target, all required seeks settle, then all participants play, with rollback on play failure.
+- `src/media/media-controller.ts` is the imperative playback boundary around `HTMLVideoElement`; it reports active seeks, waits for `seeked` even when the target time is already current, and rejects out-of-range seeks instead of silently clamping them.
+- `src/media/synchronized-playback.ts` coordinates the two-phase synchronized start: every participant supplies an explicit local target, all targets are preflight-validated, all required seeks settle, then all participants play, with rollback on play failure.
 - `src/capture/capture-frame.ts` creates a Canvas at `video.videoWidth × video.videoHeight`, draws the current frame, and returns PNG bytes.
 - `src/platform/tauri-capture.ts` owns the native capture dialog and PNG write IPC; Phase 0 orchestration uses this explicit adapter directly.
 - `src-tauri/src/media_file.rs` owns exact-file validation/authorization and `shiguredo_mp4` timing inspection.
@@ -14,7 +14,7 @@ This document records the bounded first implementation cut described in `.codex/
 - `src-tauri/src/lib.rs` contains Tauri module wiring and command registration only.
 - `src/sync/drift-measurement.ts` derives/fixes starting offsets, records drift, and summarizes it; aggregate Phase 0 statistics exclude the master stream.
 - `src/components/video-grid.tsx` owns the existing video-pane presentation and delegates state-changing callbacks.
-- `src/components/measurement-panel.tsx` owns the existing drift-panel presentation and delegates measurement actions.
+- `src/components/measurement-panel.tsx` owns the existing drift-panel presentation and action controls, including explicit Start/Pause/Resume state and baseline-aware Reset availability.
 - `src/App.tsx` owns Phase 0 state and orchestration for up to four direct-file panes, playback controls, native PNG capture, and three-video drift measurement.
 
 ## Module responsibility map
@@ -25,8 +25,8 @@ This document records the bounded first implementation cut described in `.codex/
 | `src/components/video-grid.tsx` | existing video-grid/pane presentation and media event delegation | application state, playback policy, filesystem writes, MP4 parsing | `VideoAsset` and callbacks | `App.tsx` | manual WebView2/picker/playback acceptance |
 | `src/components/measurement-panel.tsx` | existing drift-panel presentation and action controls | baseline derivation, recorder state, playback correction | `DriftSummary` and callbacks | `App.tsx` | manual measurement acceptance |
 | `src/platform/tauri-media.ts` | Tauri dialog/core calls, exact-file preparation, asset URL, timing IPC | React state, playback policy, presentation | Tauri core/dialog APIs | `App.tsx`, `VideoAsset` type | Rust command boundary + manual native acceptance |
-| `src/media/media-controller.ts` | imperative HTML video playback adapter and settled-seek behavior | sync policy, UI, filesystem | `HTMLVideoElement` | `App.tsx`, synchronized playback | Vitest controller regression + manual WebView behavior |
-| `src/media/synchronized-playback.ts` | explicit per-participant local targets, two-phase pre-play seek/play, rollback policy | UI state, dialogs, file parsing | `MediaController` | `App.tsx` | deterministic fake-controller tests |
+| `src/media/media-controller.ts` | imperative HTML video playback adapter, settled-seek behavior, playable-range enforcement | sync policy, UI, filesystem | `HTMLVideoElement` | `App.tsx`, synchronized playback | Vitest controller regression + manual WebView behavior |
+| `src/media/synchronized-playback.ts` | explicit per-participant local targets, target preflight, two-phase pre-play seek/play, rollback policy | UI state, dialogs, file parsing | `MediaController` | `App.tsx` | deterministic fake-controller tests |
 | `src/capture/capture-frame.ts` | source-resolution Canvas PNG encoding | path selection, file writing | Canvas/video DOM APIs | `App.tsx` | Vitest source-dimension test |
 | `src/platform/tauri-capture.ts` | Tauri save dialog and PNG write IPC | React state, PNG rendering, media parsing | Tauri core/dialog APIs | `App.tsx` | Rust writer boundary + manual save acceptance |
 | `src/sync/drift-measurement.ts` | baseline offset derivation, drift sample creation, slave-only aggregation, percentile summary | playback correction, UI | none | `App.tsx` | Vitest baseline/offset/statistics/master-exclusion tests |
@@ -50,7 +50,7 @@ This document records the bounded first implementation cut described in `.codex/
 
 Fixture: `tmp/phase0/synthetic-30fps.mp4`, generated with `scripts/generate-test-video.ps1` and FFmpeg 8.1.1 Essentials. The fixture is ignored and is not committed.
 
-Current direct review-hardening result:
+Last verified result before the latest correctness-hardening change:
 
 ```text
 video_track_count: 1
@@ -62,17 +62,21 @@ frame_duration_seconds: 0.03333333333333333
 cfr: true
 ```
 
-The fixture was regenerated on the current Windows head with `scripts/generate-test-video.ps1` using an explicit ignored output path, then parsed through the targeted Rust test with `MVSP_PHASE0_FIXTURE`. The parser is fed only requested ranges. A hard per-request safety limit of 64 MiB rejects an unbounded or oversized `RequiredInput` instead of allocating the remaining multi-GB file.
+The parser is fed only requested ranges. A hard per-request safety limit of 64 MiB rejects an unbounded or oversized `RequiredInput` instead of allocating the remaining multi-GB file. Regenerate and reparse the fixture on the new head before Ready review.
 
 ## Capture and drift evidence
 
 - The Canvas unit test verifies that output dimensions use source video dimensions rather than displayed CSS size. Native WebView2 capture and saved-PNG dimension verification remain manual acceptance checks.
-- Drift measurement freezes `offset[i] = G - L[i]` at measurement start, preserves that baseline across pause/resume, and resets the measurement when a global seek or participant-set change invalidates the relationship. Unknown offsets fail closed, and paused master intervals are not recorded. Regression tests cover non-zero starting offsets and participant mismatch.
-- Synchronized play uses an explicit `targetTime` for every participant. When a measurement baseline exists, orchestration supplies `G - offset[i]`; without a baseline it supplies the same current master time to each participant. The coordinator settles every required seek before any `play()` call and pauses all participants if one play operation fails.
-- The direct review-hardening test intentionally starts the master/slaves away from their assigned targets and asserts the actual seek arguments (`12`, `10.5`, `11.25`) so a regression cannot pass merely because no seek was necessary.
-- Synchronized playback now requires all loaded video elements to have controllers before starting; it does not silently start only a ready subset.
-- Drift aggregation excludes Camera 1/master so the master cannot inject a zero-error sample into median/p95/max.
-- No real three-camera run has been performed on the direct review-hardening head; threshold selection and sustained drift characterization remain pending.
+- Drift measurement freezes `offset[i] = G - L[i]` at measurement start and preserves that baseline across Pause/Resume.
+- Any global seek now invalidates an existing measurement baseline even when measurement sampling is paused; the next Start creates a fresh baseline instead of silently reusing stale offsets.
+- Participant-set changes and missing offsets fail closed. Paused-master intervals are not recorded.
+- Drift recording reuses the shared slave-sample mapping helper instead of duplicating global/local error math in `App.tsx`.
+- Synchronized play uses an explicit `targetTime` for every participant. When a measurement baseline exists, orchestration supplies `G - offset[i]`; without a baseline it supplies the same current master time to each participant.
+- The playback coordinator preflight-validates all assigned targets before any seek starts. Negative or finite-duration-overrun targets are rejected instead of being clamped to an incorrect frame.
+- Synchronized playback requires all loaded video elements to have controllers before starting; it does not silently start only a ready subset.
+- UI-wide playback state is recomputed from all loaded controllers. Playing one video independently no longer falsely marks synchronized playback as active or disables `Play all`.
+- The measurement panel distinguishes Start, Pause, and Resume and permits Reset whenever a baseline exists, even before the first drift sample is recorded.
+- No real three-camera run has been performed on the latest correctness-hardening head; threshold selection and sustained drift characterization remain pending.
 
 ## Environment previously recorded
 
@@ -88,9 +92,9 @@ WebView2 runtime present
 FFmpeg 8.1.1 Essentials (developer fixture generation only)
 ```
 
-## Verification status after direct review hardening
+## Verification required after latest correctness hardening
 
-The prior `68c8fe5` results were treated as historical and the complete set was rerun after the explicit-target playback changes. A local nullable-baseline compile fix was included before the final successful run.
+The `df0e8ba` head passed 13 TypeScript tests, 7 Rust tests, typecheck/lint/build/fmt/clippy, Tauri dev startup, regenerated synthetic MP4 parsing, and MSI/NSIS packaging. Those results are historical only after the latest source changes and must not be inherited as current-head evidence.
 
 Run on Windows from the repository root:
 
@@ -115,18 +119,16 @@ $env:MVSP_PHASE0_FIXTURE = (Resolve-Path "tmp/phase0/synthetic-30fps.mp4").Path
 & "$env:USERPROFILE\.cargo\bin\cargo.exe" test --manifest-path src-tauri/Cargo.toml validates_phase0_fixture_when_requested -- --nocapture
 ```
 
-Current results: 13 TypeScript tests passed, 7 Rust tests passed, typecheck/lint/build/fmt/clippy passed, Tauri dev reached Vite ready + Rust debug application launch, the regenerated fixture parsed as `avc1`, 3.0 seconds, 90 samples, 0.03333333333333333 seconds/frame, CFR, and `npm run tauri build` produced both MSI and NSIS installers:
-
-- `src-tauri/target/release/bundle/msi/MultiVideoSyncPlayer_0.1.0_x64_en-US.msi`
-- `src-tauri/target/release/bundle/nsis/MultiVideoSyncPlayer_0.1.0_x64-setup.exe`
-
-No CI/status checks are published for this repository.
+Record the exact TypeScript/Rust test counts and all command outcomes. The newly added controller/coordinator range checks should increase the TypeScript test count above the previously recorded 13; record the actual result rather than assuming a fixed count.
 
 Manual acceptance delegated to Windows remains:
 
 - native multi-file selection and WebView2 decoding;
 - no full-file copy and no source modification (record source size/mtime, optionally hash);
 - three-camera start/pause/resume with non-zero baseline offsets preserved;
+- pause measurement, perform a global seek, then verify Resume is no longer offered and a new baseline is created on Start;
+- independently play one video and verify `Play all` remains available until all loaded videos are actually playing;
+- exercise an out-of-range mapped target and verify synchronized playback fails clearly instead of displaying a clamped frame as synchronized;
 - saved PNG dimension verification against `videoWidth × videoHeight`, preferably with representative 4K media;
 - three-camera drift characterization with duration + median/p95/max slave error;
 - AKASO V50 Elite representative MP4 timing/parser/playback evidence, or an explicit pending result if no sample is available.

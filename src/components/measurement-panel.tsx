@@ -1,6 +1,7 @@
 import type { DriftSummary } from "../sync/drift-measurement";
 
 interface MeasurementPanelProps {
+  hasBaseline: boolean;
   isMeasuring: boolean;
   onReset: () => void;
   onToggle: () => void;
@@ -14,6 +15,7 @@ function formatSeconds(value: number): string {
 }
 
 export function MeasurementPanel({
+  hasBaseline,
   isMeasuring,
   onReset,
   onToggle,
@@ -21,6 +23,12 @@ export function MeasurementPanel({
   summary,
   videoCount,
 }: MeasurementPanelProps) {
+  const toggleLabel = isMeasuring
+    ? "Pause measurement"
+    : hasBaseline
+      ? "Resume measurement"
+      : "Start measurement";
+
   return (
     <section className="measurement-panel" aria-label="Drift measurement">
       <div>
@@ -30,9 +38,9 @@ export function MeasurementPanel({
       </div>
       <div className="measurement-actions">
         <button type="button" onClick={onToggle} disabled={videoCount < 3}>
-          {isMeasuring ? "Stop measurement" : "Start measurement"}
+          {toggleLabel}
         </button>
-        <button type="button" onClick={onReset} disabled={summary.sampleCount === 0}>Reset</button>
+        <button type="button" onClick={onReset} disabled={!hasBaseline}>Reset</button>
       </div>
       <dl className="metrics">
         <div><dt>Samples</dt><dd>{summary.sampleCount}</dd></div>

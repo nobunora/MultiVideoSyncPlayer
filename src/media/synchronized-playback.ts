@@ -21,12 +21,22 @@ export async function startSynchronizedPlayback(
   if (!Number.isFinite(toleranceSeconds) || toleranceSeconds < 0) {
     throw new Error("Playback seek tolerance must be a finite non-negative value.");
   }
+  if (participants.length === 0) {
+    throw new Error("At least one playback participant is required.");
+  }
+
+  for (const { id, controller, targetTime } of participants) {
+    if (!Number.isFinite(targetTime)) {
+      throw new Error(`Playback target for ${id} must be finite.`);
+    }
+    const duration = controller.getDuration();
+    if (targetTime < 0 || (Number.isFinite(duration) && targetTime > duration)) {
+      throw new Error(`Playback target for ${id} is outside the playable media range.`);
+    }
+  }
 
   const seekResults = await Promise.allSettled(
     participants.map(async ({ controller, targetTime }) => {
-      if (!Number.isFinite(targetTime)) {
-        throw new Error("Playback target must be finite.");
-      }
       const currentTime = controller.getCurrentTime();
       const needsSeek =
         !Number.isFinite(currentTime) ||

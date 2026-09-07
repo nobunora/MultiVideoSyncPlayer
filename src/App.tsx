@@ -10,6 +10,7 @@ import { inspectLocalMp4Timing, prepareLocalVideoFile, selectLocalVideoPaths } f
 import {
   applyMeasurementBaseline,
   createMeasurementBaseline,
+  createSlaveDriftSamples,
   DriftRecorder,
   hasSameMeasurementParticipants,
   summarizeDrift,
@@ -31,6 +32,7 @@ function App() {
   const [isPlaying, setIsPlaying] = useState(false);
   const [globalTime, setGlobalTime] = useState(0);
   const [isMeasuring, setIsMeasuring] = useState(false);
+  const [hasMeasurementBaseline, setHasMeasurementBaseline] = useState(false);
   const [driftSummary, setDriftSummary] = useState<DriftSummary>(() => summarizeDrift([]));
   const [message, setMessage] = useState("Ready for local MP4 files.");
   const videoRefs = useRef<Record<string, HTMLVideoElement | null>>({});
@@ -46,6 +48,15 @@ function App() {
 
   const updateAsset = useCallback((id: string, update: Partial<VideoAsset>) => {
     setAssets((current) => current.map((asset) => (asset.id === id ? { ...asset, ...update } : asset)));
+  }, []);
+
+  const clearMeasurement = useCallback((statusMessage?: string) => {
+    measurementBaseline.current = null;
+    recorder.current.reset();
+    setDriftSummary(recorder.current.summary());
+    setIsMeasuring(false);
+    setHasMeasurementBaseline(false);
+    if (statusMessage) setMessage(statusMessage);
   }, []);
 
   const addVideos = useCallback(async () => {
@@ -108,6 +119,18 @@ function App() {
     setIsPlaying(false);
   }, []);
 
+  const refreshPlaybackState = useCallback(() => {
+    const readyControllers = assets.flatMap((asset) => {
+      const controller = mediaControllers.current[asset.id];
+      return controller ? [controller] : [];
+    });
+    setIsPlaying(
+      assets.length > 0 &&
+      readyControllers.length === assets.length &&
+      readyControllers.every((controller) => !controller.isPaused()),
+    );
+  }, [assets]);
+
   const playAll = useCallback(async () => {
     try {
       if (pendingSeek.current) await pendingSeek.current;
@@ -119,11 +142,7 @@ function App() {
 
     let activeBaseline = measurementBaseline.current;
     if (activeBaseline && !hasSameMeasurementParticipants(activeBaseline, assets.map((asset) => asset.id))) {
-      measurementBaseline.current = null;
-      recorder.current.reset();
-      setDriftSummary(recorder.current.summary());
-      setIsMeasuring(false);
-      setMessage("Measurement baseline reset because the participant set changed.");
+      clearMeasurement("Measurement baseline reset because the participant set changed.");
       activeBaseline = null;
     }
 
@@ -138,11 +157,7 @@ function App() {
 
     const baselineBeforeOffsetCheck = activeBaseline;
     if (baselineBeforeOffsetCheck && assets.some((asset) => !Number.isFinite(baselineBeforeOffsetCheck.offsets[asset.id]))) {
-      measurementBaseline.current = null;
-      recorder.current.reset();
-      setDriftSummary(recorder.current.summary());
-      setIsMeasuring(false);
-      setMessage("Measurement baseline reset because an active participant has no frozen offset.");
+      clearMeasurement("Measurement baseline reset because an active participant has no frozen offset.");
       activeBaseline = null;
     }
 
@@ -170,16 +185,12 @@ function App() {
       setIsPlaying(false);
       setMessage(error instanceof Error ? error.message : "Synchronized playback could not start.");
     }
-  }, [assets]);
+  }, [assets, clearMeasurement]);
 
   const seekAll = useCallback((target: number) => {
     setGlobalTime(target);
-    if (isMeasuring) {
-      measurementBaseline.current = null;
-      recorder.current.reset();
-      setDriftSummary(recorder.current.summary());
-      setIsMeasuring(false);
-      setMessage("Measurement stopped and its baseline was reset after a global seek.");
+    if (measurementBaseline.current !== null) {
+      clearMeasurement("Measurement baseline was reset after a global seek.");
     }
 
     const previous = pendingSeek.current ?? Promise.resolve();
@@ -201,7 +212,7 @@ function App() {
         setMessage("One or more videos could not complete the global seek.");
       },
     );
-  }, [assets, isMeasuring]);
+  }, [assets, clearMeasurement]);
 
   const capture = useCallback(async (asset: VideoAsset) => {
     const video = videoRefs.current[asset.id];
@@ -230,6 +241,7 @@ function App() {
     const existingBaseline = measurementBaseline.current;
     const canResume = existingBaseline !== null && hasSameMeasurementParticipants(existingBaseline, ids);
     if (canResume) {
+      setHasMeasurementBaseline(true);
       setIsMeasuring(true);
       setMessage("Drift measurement resumed with its preserved starting baseline.");
       return;
@@ -250,9 +262,17 @@ function App() {
     measurementBaseline.current = createMeasurementBaseline(global, readings);
     recorder.current.reset();
     setDriftSummary(recorder.current.summary());
+    setHasMeasurementBaseline(true);
     setIsMeasuring(true);
     setMessage("Drift measurement started with a frozen local-time baseline.");
   }, [assets, isMeasuring]);
+
+  useEffect(() => {
+    const baseline = measurementBaseline.current;
+    if (baseline && !hasSameMeasurementParticipants(baseline, assets.map((asset) => asset.id))) {
+      clearMeasurement("Measurement baseline reset because the participant set changed.");
+    }
+  }, [assets, clearMeasurement]);
 
   useEffect(() => {
     if (!isMeasuring) return;
@@ -262,11 +282,7 @@ function App() {
       const masterController = master ? mediaControllers.current[master.id] : null;
       if (!baseline || !master || !masterController) return;
       if (!hasSameMeasurementParticipants(baseline, assets.map((asset) => asset.id))) {
-        measurementBaseline.current = null;
-        recorder.current.reset();
-        setDriftSummary(recorder.current.summary());
-        setIsMeasuring(false);
-        setMessage("Measurement stopped because the participant set changed.");
+        clearMeasurement("Measurement stopped because the participant set changed.");
         return;
       }
       if (masterController.isPaused()) return;
@@ -276,32 +292,24 @@ function App() {
         id: asset.id,
         actualLocalTime: mediaControllers.current[asset.id]?.getCurrentTime() ?? Number.NaN,
       }));
-      const samples = applyMeasurementBaseline(baseline, readings);
-      if (!samples) {
-        measurementBaseline.current = null;
-        recorder.current.reset();
-        setDriftSummary(recorder.current.summary());
-        setIsMeasuring(false);
-        setMessage("Measurement stopped because a participant had no frozen offset.");
+      const baselineVideos = applyMeasurementBaseline(baseline, readings);
+      if (!baselineVideos) {
+        clearMeasurement("Measurement stopped because a participant had no frozen offset.");
         return;
       }
-      recorder.current.record(
-        samples
-          .filter((sample) => Number.isFinite(sample.actualLocalTime))
-          .flatMap((sample) => sample.id === master.id ? [] : [{
-            sampleTimeMs: performance.now(),
-            globalTime: global,
-            videoId: sample.id,
-            expectedLocalTime: global - sample.offsetSeconds,
-            actualLocalTime: sample.actualLocalTime,
-            errorSeconds: sample.actualLocalTime - (global - sample.offsetSeconds),
-          }]),
-      );
+
+      const samples = createSlaveDriftSamples(
+        performance.now(),
+        global,
+        master.id,
+        baselineVideos,
+      ).filter((sample) => Number.isFinite(sample.actualLocalTime) && Number.isFinite(sample.errorSeconds));
+      recorder.current.record(samples);
       setDriftSummary(recorder.current.summary());
     }, SAMPLE_INTERVAL_MS);
 
     return () => window.clearInterval(handle);
-  }, [assets, isMeasuring]);
+  }, [assets, clearMeasurement, isMeasuring]);
 
   const setVideoElement = useCallback((id: string, element: HTMLVideoElement | null) => {
     videoRefs.current[id] = element;
@@ -350,18 +358,14 @@ function App() {
         }}
         onVideoElement={setVideoElement}
         onVideoError={(id) => updateAsset(id, { playbackError: "WebView2 could not decode this file." })}
-        onVideoPause={() => setIsPlaying(false)}
-        onVideoPlay={() => setIsPlaying(true)}
+        onVideoPause={refreshPlaybackState}
+        onVideoPlay={refreshPlaybackState}
       />
 
       <MeasurementPanel
+        hasBaseline={hasMeasurementBaseline}
         isMeasuring={isMeasuring}
-        onReset={() => {
-          measurementBaseline.current = null;
-          recorder.current.reset();
-          setDriftSummary(recorder.current.summary());
-          setIsMeasuring(false);
-        }}
+        onReset={() => clearMeasurement("Drift measurement reset.")}
         onToggle={toggleMeasurement}
         sampleIntervalMs={SAMPLE_INTERVAL_MS}
         summary={driftSummary}

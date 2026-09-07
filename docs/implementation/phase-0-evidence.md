@@ -48,9 +48,9 @@ This document records the bounded first implementation cut described in `.codex/
 
 ## Synthetic MP4 timing spike
 
-Fixture: `tmp/phase0/synthetic-30fps-fbd7b9e.mp4`, generated with `scripts/generate-test-video.ps1` and FFmpeg 8.1.1 Essentials. The fixture is ignored and is not committed.
+Fixture: `tmp/phase0/synthetic-30fps-6c9a3e8.mp4`, generated with `scripts/generate-test-video.ps1` and FFmpeg 8.1.1 Essentials. The fixture is ignored and is not committed.
 
-Last fully verified result before the Global Seek fail-closed source change:
+Current latest correctness-hardening result (`6c9a3e8`):
 
 ```text
 video_track_count: 1
@@ -62,7 +62,7 @@ frame_duration_seconds: 0.03333333333333333
 cfr: true
 ```
 
-The fixture was regenerated on Windows for the `fbd7b9e` source head and parsed through the targeted Rust test with `MVSP_PHASE0_FIXTURE`. The parser is fed only requested ranges. A hard per-request safety limit of 64 MiB rejects an unbounded or oversized `RequiredInput` instead of allocating the remaining multi-GB file. Regenerate and reparse the fixture after the new Global Seek source change before Ready review.
+The fixture was regenerated on Windows for the `6c9a3e8` source head with a distinct ignored output path and parsed through the targeted Rust test with `MVSP_PHASE0_FIXTURE`. The parser is fed only requested ranges. A hard per-request safety limit of 64 MiB rejects an unbounded or oversized `RequiredInput` instead of allocating the remaining multi-GB file.
 
 ## Capture and drift evidence
 
@@ -77,6 +77,9 @@ The fixture was regenerated on Windows for the `fbd7b9e` source head and parsed 
 - Synchronized playback requires all loaded video elements to have controllers before starting; it does not silently start only a ready subset.
 - UI-wide playback state is recomputed from all loaded controllers. Playing one video independently no longer falsely marks synchronized playback as active or disables `Play all`.
 - The measurement panel distinguishes Start, Pause, and Resume and permits Reset whenever a baseline exists, even before the first drift sample is recorded.
+- Measurement Start/Resume is blocked while a Global Seek is pending or any loaded controller is still seeking, so an unsettled timestamp cannot become a baseline.
+- Adding media is blocked during Global Seek; when a valid participant set changes, existing playback is paused, the baseline is cleared, and app-wide playback state is recomputed.
+- Capture rejects a selected video while it is seeking, preventing a stale decoded frame from being saved for a newer target time.
 - No real three-camera run has been performed on the latest source head; threshold selection and sustained drift characterization remain pending.
 
 ## Environment previously recorded
@@ -93,11 +96,11 @@ WebView2 runtime present
 FFmpeg 8.1.1 Essentials (developer fixture generation only)
 ```
 
-## Verification required after Global Seek fail-closed hardening
+## Verification status after Global Seek and unsettled-seek hardening
 
-The complete verification set was last rerun on source head `fbd7b9e` and recorded in docs commit `675ef1f`: focused controller/coordinator tests passed (10 tests), the full TypeScript suite passed (17 tests), 7 Rust tests passed, typecheck/lint/build/fmt/clippy passed, Tauri dev reached Vite ready and Rust debug application launch, the regenerated fixture parsed successfully, and MSI/NSIS installers were produced. Those results are now historical because source changed again.
+The previous `fbd7b9e` results recorded in `675ef1f` were treated as historical. The complete verification set was rerun on source head `6c9a3e8` after the Global Seek, unsettled-seek, participant-set, playback-state, and capture hardening.
 
-After the new Global Seek source change, run on Windows from the repository root:
+Run on Windows from the repository root:
 
 ```powershell
 npm test -- --run
@@ -112,9 +115,20 @@ npm run tauri dev
 npm run tauri build
 ```
 
-Run the focused coordinator suite first and record its actual count. Two Global Seek regression tests were added, so the full TypeScript count should increase from the prior 17 if no other test set changes; record the actual result rather than forcing an expected number.
+Current results on `6c9a3e8`: focused media/coordinator/capture suites passed (14 tests), the full TypeScript suite passed (20 tests), 7 Rust tests passed, typecheck/lint/build/fmt/clippy passed, Tauri dev reached Vite ready and Rust debug application launch, and `npm run tauri build` produced both MSI and NSIS installers:
 
-Then regenerate and parse a new synthetic fixture on the same source head using a distinct ignored filename. Record codec, duration, timescale, sample count, frame duration, and CFR result.
+- `src-tauri/target/release/bundle/msi/MultiVideoSyncPlayer_0.1.0_x64_en-US.msi`
+- `src-tauri/target/release/bundle/nsis/MultiVideoSyncPlayer_0.1.0_x64-setup.exe`
+
+The regenerated fixture parsed as `avc1`, 3.0 seconds, timescale 15360, 90 samples, 0.03333333333333333 seconds/frame, CFR. The Rust test run emitted only the existing non-fatal Windows linker stdout warning. No CI/status checks are published for this repository.
+
+The fixture command used for this run was:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts/generate-test-video.ps1 -OutputPath "tmp/phase0/synthetic-30fps-6c9a3e8.mp4"
+$env:MVSP_PHASE0_FIXTURE = (Resolve-Path "tmp/phase0/synthetic-30fps-6c9a3e8.mp4").Path
+& "$env:USERPROFILE\.cargo\bin\cargo.exe" test --manifest-path src-tauri/Cargo.toml validates_phase0_fixture_when_requested -- --nocapture
+```
 
 Manual acceptance delegated to Windows remains:
 
@@ -123,8 +137,12 @@ Manual acceptance delegated to Windows remains:
 - three-camera start/pause/resume with non-zero baseline offsets preserved;
 - pause measurement, perform a global seek, then verify Resume is no longer offered and a new baseline is created on Start;
 - independently play one video and verify `Play all` remains available until all loaded videos are actually playing;
+- attempt measurement Start/Resume while Global Seek or a native seek is pending and verify no baseline is created/resumed;
+- add a video while existing participants are playing and verify playback pauses, the baseline clears, and app-wide state becomes not-playing;
+- attempt Add Video while Global Seek is pending and verify participant mutation is declined;
 - verify Global Seek does not silently skip an unready loaded video;
 - exercise an out-of-range Global Seek / mapped target and verify no participant is moved before the preflight failure;
+- attempt capture while the selected video is seeking and verify it is declined, then confirm normal capture after seek settlement;
 - saved PNG dimension verification against `videoWidth × videoHeight`, preferably with representative 4K media;
 - three-camera drift characterization with duration + median/p95/max slave error;
 - AKASO V50 Elite representative MP4 timing/parser/playback evidence, or an explicit pending result if no sample is available.

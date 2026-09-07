@@ -13,7 +13,7 @@ This document records the bounded first implementation cut described in `.codex/
 - `src-tauri/src/capture_io.rs` owns PNG file creation/writing.
 - `src-tauri/src/lib.rs` contains Tauri module wiring and command registration only.
 - `src/sync/drift-measurement.ts` derives/fixes starting offsets, records drift, and summarizes it; aggregate Phase 0 statistics exclude the master stream.
-- `src/components/video-grid.tsx` owns the existing video-pane presentation and delegates state-changing callbacks.
+- `src/components/video-grid.tsx` owns the existing video-pane presentation, delegates state-changing callbacks, and opts Tauri asset videos into CORS so Canvas capture can export them.
 - `src/components/measurement-panel.tsx` owns the existing drift-panel presentation and action controls, including explicit Start/Pause/Resume state and baseline-aware Reset availability.
 - `src/App.tsx` owns Phase 0 state and orchestration for up to four direct-file panes, playback controls, native PNG capture, and three-video drift measurement.
 
@@ -66,7 +66,8 @@ The fixture was regenerated on Windows for the previous `6c9a3e8` source head wi
 
 ## Capture and drift evidence
 
-- The Canvas unit test verifies that output dimensions use source video dimensions rather than displayed CSS size. Native WebView2 capture and saved-PNG dimension verification remain manual acceptance checks.
+- The Canvas unit test verifies that output dimensions use source video dimensions rather than displayed CSS size. Tauri asset videos use `crossOrigin="anonymous"`; this is required because native Canvas export otherwise reports a tainted canvas for `asset.localhost` media.
+- Synthetic WebView2 quick-use verified native multi-file selection, three-video decoding, baseline-aware playback/seek, and native PNG export. The saved result was a 1280×720 PNG with RGBA pixels and did not alter the source video.
 - Drift measurement freezes `offset[i] = G - L[i]` at measurement start and preserves that baseline across Pause/Resume.
 - Global Seek pauses drift sampling but preserves an existing valid measurement baseline; Resume reuses the same alignment after the seek. Participant-set changes still clear the baseline and require a fresh Start.
 - Participant-set changes and missing offsets fail closed. Paused-master intervals are not recorded.
@@ -95,6 +96,7 @@ git 2.54.0.windows.1
 Visual Studio Build Tools 2026 18.6.1 (VC tools present)
 WebView2 runtime present
 FFmpeg 8.1.1 Essentials (developer fixture generation only)
+Python 3.14.5 with pywinauto 0.6.9, pyautogui 0.9.54, Pillow 12.2.0, and websocket-client 1.9.2 for GUI/WebView2 quick-use verification
 ```
 
 ## Verification status after baseline-preserving Global Seek
@@ -116,14 +118,14 @@ npm run tauri dev
 npm run tauri build
 ```
 
-Current results on `6141baf`: focused drift/synchronized-playback suites passed (17 tests), the full TypeScript suite passed (22 tests), 7 Rust tests passed, typecheck/lint/build/fmt/clippy passed, Tauri dev reached Vite ready and Rust debug application launch, and `npm run tauri build` produced both MSI and NSIS installers:
+Current results on source head `3346129`: focused drift/synchronized-playback suites passed (17 tests), the full TypeScript suite passed (22 tests), 7 Rust tests passed, typecheck/lint/build/fmt/clippy passed, Tauri dev reached Vite ready and Rust debug application launch, and `npm run tauri build` produced both MSI and NSIS installers:
 
 - `src-tauri/target/release/bundle/msi/MultiVideoSyncPlayer_0.1.0_x64_en-US.msi`
 - `src-tauri/target/release/bundle/nsis/MultiVideoSyncPlayer_0.1.0_x64-setup.exe`
 
 The reused fixture evidence is `avc1`, 3.0 seconds, timescale 15360, 90 samples, 0.03333333333333333 seconds/frame, CFR. The Rust test run emitted only the existing non-fatal Windows linker stdout warning. No CI/status checks are published for this repository.
 
-Quick-use gate: **BLOCKED by interactive-environment limitation, not by an observed product failure.** Tauri dev launched successfully, but this session cannot operate and observe the native picker/WebView2 window to complete the three-file workflow. Therefore no manual before/after local timestamps or PNG result is claimed.
+Quick-use gate: **USABLE ALPHA.** With Windows WebView2 and the native picker, three ignored synthetic local MP4s were opened without copying. Deliberate local positions were set to A=1.2 s, B=0.8 s, C=0.5 s; measurement was started; Play all and Pause all completed; then Global Seek was set to G=2.204 s. The observed settled positions were A=2.204 s, B=1.804 s, C=1.504 s, preserving offsets 0 / -0.4 / -0.7 rather than normalizing the cameras. Measurement remained resumable, and native PNG capture saved `tmp/phase0/gui-capture-fixed.png` as 1280×720 RGBA PNG. The initial tainted-Canvas failure was fixed by `crossOrigin="anonymous"` and the flow was rerun successfully.
 
 The fixture command used for this run was:
 
@@ -133,12 +135,10 @@ $env:MVSP_PHASE0_FIXTURE = (Resolve-Path "tmp/phase0/synthetic-30fps-6c9a3e8.mp4
 & "$env:USERPROFILE\.cargo\bin\cargo.exe" test --manifest-path src-tauri/Cargo.toml validates_phase0_fixture_when_requested -- --nocapture
 ```
 
-Manual acceptance delegated to Windows remains:
+Remaining manual acceptance delegated to representative media remains:
 
-- native multi-file selection and WebView2 decoding;
-- no full-file copy and no source modification (record source size/mtime, optionally hash);
-- three-camera start/pause/resume with non-zero baseline offsets preserved;
-- start measurement with deliberately different local positions (for example A=12, B=10.5, C=11.25), perform Global Seek to G=20, and verify the targets become A=20, B=18.5, C=19.25 while Resume remains available;
+- no full-file copy and no source modification on representative files (record source size/mtime, optionally hash);
+- three-camera start/pause/resume and Global Seek on representative files with non-zero baseline offsets preserved;
 - independently play one video and verify `Play all` remains available until all loaded videos are actually playing;
 - attempt measurement Start/Resume while Global Seek or a native seek is pending and verify no baseline is created/resumed;
 - add a video while existing participants are playing and verify playback pauses, the baseline clears, and app-wide state becomes not-playing;
@@ -146,7 +146,7 @@ Manual acceptance delegated to Windows remains:
 - verify Global Seek does not silently skip an unready loaded video;
 - exercise an out-of-range Global Seek / mapped target and verify no participant is moved before the preflight failure;
 - attempt capture while the selected video is seeking and verify it is declined, then confirm normal capture after seek settlement;
-- saved PNG dimension verification against `videoWidth × videoHeight`, preferably with representative 4K media;
+- saved PNG dimension verification against `videoWidth × videoHeight` with representative 4K media;
 - three-camera drift characterization with duration + median/p95/max slave error;
 - AKASO V50 Elite representative MP4 timing/parser/playback evidence, or an explicit pending result if no sample is available.
 

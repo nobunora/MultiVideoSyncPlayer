@@ -1,16 +1,17 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import "./App.css";
 import { captureCurrentFrame } from "./capture/capture-frame";
-import { chooseCapturePath, writeCapturePng } from "./capture/capture-io";
 import { MeasurementPanel } from "./components/measurement-panel";
 import { VideoGrid, type LoadError, type VideoAsset } from "./components/video-grid";
-import { inspectMp4Timing, prepareVideoFile, selectVideoPaths } from "./media/local-file";
 import { HtmlVideoController, type MediaController } from "./media/media-controller";
 import { startSynchronizedPlayback } from "./media/synchronized-playback";
+import { selectCaptureOutputPath, writePngFile } from "./platform/tauri-capture";
+import { inspectLocalMp4Timing, prepareLocalVideoFile, selectLocalVideoPaths } from "./platform/tauri-media";
 import {
   applyMeasurementBaseline,
   createMeasurementBaseline,
   DriftRecorder,
+  hasSameMeasurementParticipants,
   summarizeDrift,
   type DriftSummary,
   type MeasurementBaseline,
@@ -54,11 +55,11 @@ function App() {
     }
 
     try {
-      const paths = (await selectVideoPaths()).slice(0, MAX_VIDEOS - assets.length);
+      const paths = (await selectLocalVideoPaths()).slice(0, MAX_VIDEOS - assets.length);
       const prepared = await Promise.all(
         paths.map(async (path) => {
           try {
-            const file = await prepareVideoFile(path);
+            const file = await prepareLocalVideoFile(path);
             const asset: VideoAsset = {
               ...file,
               id: crypto.randomUUID(),
@@ -71,7 +72,7 @@ function App() {
             };
 
             try {
-              asset.timing = await inspectMp4Timing(file.path);
+              asset.timing = await inspectLocalMp4Timing(file.path);
             } catch (error) {
               asset.timingError = error instanceof Error ? error.message : "Timing metadata is unavailable.";
             }
@@ -116,9 +117,34 @@ function App() {
       return;
     }
 
+    let activeBaseline = measurementBaseline.current;
+    if (activeBaseline && !hasSameMeasurementParticipants(activeBaseline, assets.map((asset) => asset.id))) {
+      measurementBaseline.current = null;
+      recorder.current.reset();
+      setDriftSummary(recorder.current.summary());
+      setIsMeasuring(false);
+      setMessage("Measurement baseline reset because the participant set changed.");
+      activeBaseline = null;
+    }
+
+    const masterController = mediaControllers.current[assets[0]?.id ?? ""];
+    const masterTime = masterController?.getCurrentTime() ?? globalTime;
+    if (activeBaseline && assets.some((asset) => !Number.isFinite(activeBaseline?.offsets[asset.id]))) {
+      measurementBaseline.current = null;
+      recorder.current.reset();
+      setDriftSummary(recorder.current.summary());
+      setIsMeasuring(false);
+      setMessage("Measurement baseline reset because an active participant has no frozen offset.");
+      activeBaseline = null;
+    }
     const participants = assets.flatMap((asset) => {
       const controller = mediaControllers.current[asset.id];
-      return controller ? [{ id: asset.id, controller }] : [];
+      if (!controller) return [];
+      return [{
+        id: asset.id,
+        controller,
+        targetTime: activeBaseline ? masterTime - activeBaseline.offsets[asset.id] : masterTime,
+      }];
     });
     if (participants.length === 0) {
       setIsPlaying(false);
@@ -126,8 +152,6 @@ function App() {
       return;
     }
 
-    const masterController = mediaControllers.current[assets[0]?.id ?? ""];
-    const masterTime = masterController?.getCurrentTime() ?? globalTime;
     try {
       await startSynchronizedPlayback(participants, masterTime, PRE_PLAY_SEEK_TOLERANCE_SECONDS);
       setIsPlaying(true);
@@ -176,9 +200,9 @@ function App() {
     try {
       const frame = captureCurrentFrame(video);
       const defaultName = `${asset.fileName.replace(/\.mp4$/i, "")}-frame.png`;
-      const path = await chooseCapturePath(defaultName);
+      const path = await selectCaptureOutputPath(defaultName);
       if (!path) return;
-      await writeCapturePng(path, frame.pngBytes);
+      await writePngFile(path, frame.pngBytes);
       setMessage(`Saved ${frame.width}×${frame.height} PNG without changing the source video.`);
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Frame capture failed.");
@@ -194,9 +218,7 @@ function App() {
 
     const ids = assets.map((asset) => asset.id);
     const existingBaseline = measurementBaseline.current;
-    const canResume = existingBaseline !== null &&
-      existingBaseline.videoIds.length === ids.length &&
-      existingBaseline.videoIds.every((id, index) => id === ids[index]);
+    const canResume = existingBaseline !== null && hasSameMeasurementParticipants(existingBaseline, ids);
     if (canResume) {
       setIsMeasuring(true);
       setMessage("Drift measurement resumed with its preserved starting baseline.");
@@ -229,6 +251,15 @@ function App() {
       const master = assets[0];
       const masterController = master ? mediaControllers.current[master.id] : null;
       if (!baseline || !master || !masterController) return;
+      if (!hasSameMeasurementParticipants(baseline, assets.map((asset) => asset.id))) {
+        measurementBaseline.current = null;
+        recorder.current.reset();
+        setDriftSummary(recorder.current.summary());
+        setIsMeasuring(false);
+        setMessage("Measurement stopped because the participant set changed.");
+        return;
+      }
+      if (masterController.isPaused()) return;
 
       const global = masterController.getCurrentTime();
       const readings = assets.map((asset) => ({
@@ -236,6 +267,14 @@ function App() {
         actualLocalTime: mediaControllers.current[asset.id]?.getCurrentTime() ?? Number.NaN,
       }));
       const samples = applyMeasurementBaseline(baseline, readings);
+      if (!samples) {
+        measurementBaseline.current = null;
+        recorder.current.reset();
+        setDriftSummary(recorder.current.summary());
+        setIsMeasuring(false);
+        setMessage("Measurement stopped because a participant had no frozen offset.");
+        return;
+      }
       recorder.current.record(
         samples
           .filter((sample) => Number.isFinite(sample.actualLocalTime))

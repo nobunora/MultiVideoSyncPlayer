@@ -4,13 +4,11 @@ This document records the bounded first implementation cut described in `.codex/
 
 ## Implemented paths
 
-- `src/media/local-file.ts` exposes the feature-facing MP4 selection/prepare/timing API without owning Tauri calls.
-- `src/platform/tauri-media.ts` owns native MP4 selection, exact-file IPC, timing IPC, and asset URL creation through the Tauri APIs.
+- `src/platform/tauri-media.ts` owns native MP4 selection, exact-file IPC, timing IPC, and asset URL creation through the Tauri APIs; Phase 0 orchestration uses this explicit adapter directly.
 - `src/media/media-controller.ts` is the imperative playback boundary around `HTMLVideoElement`; it reports active seeks and waits for `seeked` even when the target time is already current.
 - `src/media/synchronized-playback.ts` coordinates the two-phase synchronized start: settle all required seeks, then play all participants, rolling back on play failure.
 - `src/capture/capture-frame.ts` creates a Canvas at `video.videoWidth × video.videoHeight`, draws the current frame, and returns PNG bytes.
-- `src/capture/capture-io.ts` exposes the feature-facing capture output API without owning Tauri calls.
-- `src/platform/tauri-capture.ts` owns the native capture dialog and PNG write IPC.
+- `src/platform/tauri-capture.ts` owns the native capture dialog and PNG write IPC; Phase 0 orchestration uses this explicit adapter directly.
 - `src-tauri/src/media_file.rs` owns exact-file validation/authorization and `shiguredo_mp4` timing inspection.
 - `src-tauri/src/capture_io.rs` owns PNG file creation/writing.
 - `src-tauri/src/lib.rs` contains Tauri module wiring and command registration only.
@@ -26,13 +24,11 @@ This document records the bounded first implementation cut described in `.codex/
 | `src/App.tsx` | Phase 0 state, UI composition, and orchestration | low-level seek/play/pause mechanics, filesystem writes, MP4 parsing, detailed pane/panel presentation | media/capture/sync adapters, presentational components | application entry | behavior covered through pure adapter/sync tests plus manual UI acceptance |
 | `src/components/video-grid.tsx` | existing video-grid/pane presentation and media event delegation | application state, playback policy, filesystem writes, MP4 parsing | `VideoAsset` and callbacks | `App.tsx` | manual WebView2/picker/playback acceptance |
 | `src/components/measurement-panel.tsx` | existing drift-panel presentation and action controls | baseline derivation, recorder state, playback correction | `DriftSummary` and callbacks | `App.tsx` | manual measurement acceptance |
-| `src/media/local-file.ts` | feature-facing MP4 selection, preparation, and timing API | raw Tauri calls, playback policy, capture output | `platform/tauri-media` | `App.tsx` | Rust media-file tests + manual picker/playback acceptance |
-| `src/platform/tauri-media.ts` | Tauri dialog/core calls, exact-file preparation, asset URL, timing IPC | React state, playback policy, presentation | Tauri core/dialog APIs | `media/local-file.ts` | Rust command boundary + manual native acceptance |
+| `src/platform/tauri-media.ts` | Tauri dialog/core calls, exact-file preparation, asset URL, timing IPC | React state, playback policy, presentation | Tauri core/dialog APIs | `App.tsx`, `VideoAsset` type | Rust command boundary + manual native acceptance |
 | `src/media/media-controller.ts` | imperative HTML video playback adapter and settled-seek behavior | sync policy, UI, filesystem | `HTMLVideoElement` | `App.tsx`, synchronized playback | Vitest controller regression + manual WebView behavior |
 | `src/media/synchronized-playback.ts` | two-phase pre-play seek/play/rollback policy | UI state, dialogs, file parsing | `MediaController` | `App.tsx` | deterministic fake-controller tests |
 | `src/capture/capture-frame.ts` | source-resolution Canvas PNG encoding | path selection, file writing | Canvas/video DOM APIs | `App.tsx` | Vitest source-dimension test |
-| `src/capture/capture-io.ts` | feature-facing capture destination and write API | raw Tauri calls, PNG rendering, media parsing | `platform/tauri-capture` | `App.tsx` | Rust writer boundary + manual save acceptance |
-| `src/platform/tauri-capture.ts` | Tauri save dialog and PNG write IPC | React state, PNG rendering, media parsing | Tauri core/dialog APIs | `capture/capture-io.ts` | Rust writer boundary + manual save acceptance |
+| `src/platform/tauri-capture.ts` | Tauri save dialog and PNG write IPC | React state, PNG rendering, media parsing | Tauri core/dialog APIs | `App.tsx` | Rust writer boundary + manual save acceptance |
 | `src/sync/drift-measurement.ts` | baseline offset derivation, drift sample creation, slave-only aggregation, percentile summary | playback correction, UI | none | `App.tsx` | Vitest baseline/offset/statistics/master-exclusion tests |
 | `src-tauri/src/media_file.rs` | canonical path validation, exact asset authorization, MP4 range reads/timing inspection | capture I/O, Tauri app wiring | `std::fs`, Tauri asset scope, `shiguredo_mp4` | Tauri commands | Rust path/range/parser fixture tests |
 | `src-tauri/src/capture_io.rs` | create-new PNG output write | media validation/parsing | `std::fs`/`std::io` | Tauri command | manual save acceptance; narrow command surface |
@@ -71,8 +67,8 @@ The fixture was regenerated on Windows with `scripts/generate-test-video.ps1` an
 ## Capture and drift evidence
 
 - The Canvas unit test verifies that output dimensions use source video dimensions rather than displayed CSS size. Native WebView2 capture and saved-PNG dimension verification remain manual acceptance checks.
-- Drift measurement freezes `offset[i] = G - L[i]` at measurement start, preserves that baseline across pause/resume, and resets the measurement when a global seek changes the relationship. A regression test proves non-zero starting offsets produce zero initial error and only later divergence is counted.
-- Synchronized play now settles all required seeks before any `play()` call, blocks play while a global seek is pending, and pauses all participants if one play operation fails. Deterministic controller tests cover seek ordering, seek failure, and play rollback.
+- Drift measurement freezes `offset[i] = G - L[i]` at measurement start, preserves that baseline across pause/resume, and resets the measurement when a global seek or participant-set change invalidates the relationship. Unknown offsets fail closed, and paused master intervals are not recorded. Regression tests cover non-zero starting offsets and participant mismatch.
+- Synchronized play now settles all required per-participant seeks before any `play()` call, uses the frozen local target `G - offset[i]` when a baseline exists, blocks play while a global seek is pending, and pauses all participants if one play operation fails. Deterministic controller tests cover seek ordering, baseline-preserving targets, seek failure, and play rollback.
 - Drift aggregation excludes Camera 1/master so the master cannot inject a zero-error sample into median/p95/max. A regression test covers master exclusion.
 - No real three-camera run has been performed on the review-fix commit; threshold selection and sustained drift characterization remain pending.
 
@@ -107,7 +103,12 @@ npm run tauri dev
 npm run tauri build -- --bundles nsis
 ```
 
-Results: 10 TypeScript tests passed, 7 Rust tests passed, typecheck/lint/build/fmt/clippy passed, Tauri dev startup reached Vite ready + Rust debug application launch, and NSIS packaging produced `src-tauri/target/release/bundle/nsis/MultiVideoSyncPlayer_0.1.0_x64-setup.exe`. The default all-bundle command reached successful release compilation and MSI creation but hit a Windows file-lock error before its NSIS phase; the NSIS-only command then completed successfully after the stale development process was stopped.
+Current-head results: 12 TypeScript tests passed, 7 Rust tests passed, typecheck/lint/build/fmt/clippy passed, Tauri dev startup reached Vite ready + Rust debug application launch, the regenerated synthetic fixture parsed as `avc1`, 3.0 seconds, 90 samples, CFR, and the default `npm run tauri build` produced both:
+
+- `src-tauri/target/release/bundle/msi/MultiVideoSyncPlayer_0.1.0_x64_en-US.msi`
+- `src-tauri/target/release/bundle/nsis/MultiVideoSyncPlayer_0.1.0_x64-setup.exe`
+
+The automated verification is current for this review-fix head. Native representative-media interaction, 4K saved-PNG dimension inspection, three-camera drift statistics, and AKASO evidence remain manual acceptance items and have not been claimed here.
 
 Manual acceptance delegated to Codex/Windows remains:
 

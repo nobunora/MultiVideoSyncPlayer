@@ -3,27 +3,32 @@ import type { MediaController } from "./media-controller";
 export interface PlaybackParticipant {
   id: string;
   controller: MediaController;
+  targetTime?: number;
 }
 
 function failedOperationMessage(operation: "seek" | "play"): Error {
   return new Error(
     operation === "seek"
-      ? "One or more videos could not seek to the common playback time."
+      ? "One or more videos could not seek to the assigned playback time."
       : "One or more videos could not start; playback was rolled back.",
   );
 }
 
 export async function startSynchronizedPlayback(
   participants: PlaybackParticipant[],
-  targetTime: number,
+  commonTargetTime: number,
   toleranceSeconds: number,
 ): Promise<void> {
-  if (!Number.isFinite(targetTime)) {
+  if (!Number.isFinite(commonTargetTime)) {
     throw new Error("Playback target must be finite.");
   }
 
   const seekResults = await Promise.allSettled(
-    participants.map(async ({ controller }) => {
+    participants.map(async ({ controller, targetTime: participantTargetTime }) => {
+      const targetTime = participantTargetTime ?? commonTargetTime;
+      if (!Number.isFinite(targetTime)) {
+        throw new Error("Playback target must be finite.");
+      }
       const currentTime = controller.getCurrentTime();
       const needsSeek =
         !Number.isFinite(currentTime) ||

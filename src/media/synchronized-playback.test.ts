@@ -15,16 +15,21 @@ function deferred<T = void>(): { promise: Promise<T>; resolve: (value: T) => voi
 function fakeController(currentTime: number, seekOperation: Promise<void>): MediaController & {
   playCalls: number;
   pauseCalls: number;
+  seekTargets: number[];
 } {
   const state = {
     playCalls: 0,
     pauseCalls: 0,
+    seekTargets: [] as number[],
   };
 
   return {
     getCurrentTime: () => currentTime,
     getDuration: () => 30,
-    seek: () => seekOperation,
+    seek: (targetTime) => {
+      state.seekTargets.push(targetTime);
+      return seekOperation;
+    },
     play: () => {
       state.playCalls += 1;
       return Promise.resolve();
@@ -39,10 +44,34 @@ function fakeController(currentTime: number, seekOperation: Promise<void>): Medi
     get pauseCalls() {
       return state.pauseCalls;
     },
+    get seekTargets() {
+      return state.seekTargets;
+    },
   };
 }
 
 describe("synchronized playback", () => {
+  it("preserves frozen per-participant local targets during start/resume", async () => {
+    const master = fakeController(12, Promise.resolve());
+    const slaveB = fakeController(10.5, Promise.resolve());
+    const slaveC = fakeController(11.25, Promise.resolve());
+
+    await startSynchronizedPlayback(
+      [
+        { id: "camera-a", controller: master, targetTime: 12 },
+        { id: "camera-b", controller: slaveB, targetTime: 10.5 },
+        { id: "camera-c", controller: slaveC, targetTime: 11.25 },
+      ],
+      12,
+      0.1,
+    );
+
+    expect(master.seekTargets).toEqual([]);
+    expect(slaveB.seekTargets).toEqual([]);
+    expect(slaveC.seekTargets).toEqual([]);
+    expect([master.playCalls, slaveB.playCalls, slaveC.playCalls]).toEqual([1, 1, 1]);
+  });
+
   it("does not play any controller before every required seek settles", async () => {
     const firstSeek = deferred();
     const secondSeek = deferred();

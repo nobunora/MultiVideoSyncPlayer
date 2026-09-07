@@ -4,6 +4,7 @@ import {
   createMeasurementBaseline,
   createDriftSamples,
   createSlaveDriftSamples,
+  hasSameMeasurementParticipants,
   summarizeDrift,
 } from "./drift-measurement";
 
@@ -22,7 +23,7 @@ describe("drift measurement", () => {
         { id: "camera-a", actualLocalTime: 12 },
         { id: "camera-b", actualLocalTime: 10.5 },
         { id: "camera-c", actualLocalTime: 11.25 },
-      ]),
+      ])!,
     );
 
     expect(baseline.offsets).toEqual({ "camera-a": 0, "camera-b": 1.5, "camera-c": 0.75 });
@@ -36,7 +37,7 @@ describe("drift measurement", () => {
         { id: "camera-a", actualLocalTime: 12.25 },
         { id: "camera-b", actualLocalTime: 10.73 },
         { id: "camera-c", actualLocalTime: 11.48 },
-      ]),
+      ])!,
     );
     expect(summarizeDrift(laterSamples).maxAbsoluteError).toBeCloseTo(0.02);
   });
@@ -48,6 +49,22 @@ describe("drift measurement", () => {
 
     expect(sample.expectedLocalTime).toBe(10);
     expect(sample.errorSeconds).toBeCloseTo(0.25);
+  });
+
+  it("rejects a participant set that does not match the frozen baseline", () => {
+    const baseline = createMeasurementBaseline(12, [
+      { id: "camera-a", actualLocalTime: 12 },
+      { id: "camera-b", actualLocalTime: 10.5 },
+      { id: "camera-c", actualLocalTime: 11.25 },
+    ]);
+
+    expect(hasSameMeasurementParticipants(baseline, ["camera-a", "camera-b", "camera-c"])).toBe(true);
+    expect(hasSameMeasurementParticipants(baseline, ["camera-a", "camera-b", "camera-d"])).toBe(false);
+    expect(applyMeasurementBaseline(baseline, [
+      { id: "camera-a", actualLocalTime: 12 },
+      { id: "camera-b", actualLocalTime: 10.5 },
+      { id: "camera-d", actualLocalTime: 11.25 },
+    ])).toBeNull();
   });
 
   it("excludes the master stream from aggregate drift samples", () => {

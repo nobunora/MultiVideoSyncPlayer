@@ -1,11 +1,11 @@
-import type { PreparedVideoFile, Mp4TimingInfo } from "../media/local-file";
+import type { PlatformMp4TimingInfo, PlatformPreparedVideoFile } from "../platform/tauri-media";
 
-export interface VideoAsset extends PreparedVideoFile {
+export interface VideoAsset extends PlatformPreparedVideoFile {
   id: string;
   duration: number;
   width: number;
   height: number;
-  timing: Mp4TimingInfo | null;
+  timing: PlatformMp4TimingInfo | null;
   timingError: string | null;
   playbackError: string | null;
 }

@@ -44,14 +44,29 @@ export function createMeasurementBaseline(
   };
 }
 
+export function hasSameMeasurementParticipants(
+  baseline: MeasurementBaseline,
+  participantIds: string[],
+): boolean {
+  return baseline.videoIds.length === participantIds.length &&
+    baseline.videoIds.every((id, index) => id === participantIds[index]);
+}
+
 export function applyMeasurementBaseline(
   baseline: MeasurementBaseline,
   readings: MeasurementReading[],
-): MeasurementVideo[] {
-  return readings.map((reading) => ({
-    ...reading,
-    offsetSeconds: baseline.offsets[reading.id] ?? 0,
-  }));
+): MeasurementVideo[] | null {
+  if (!hasSameMeasurementParticipants(baseline, readings.map((reading) => reading.id))) {
+    return null;
+  }
+
+  const videos: MeasurementVideo[] = [];
+  for (const reading of readings) {
+    const offsetSeconds = baseline.offsets[reading.id];
+    if (!Number.isFinite(offsetSeconds)) return null;
+    videos.push({ ...reading, offsetSeconds });
+  }
+  return videos;
 }
 
 export function createDriftSamples(

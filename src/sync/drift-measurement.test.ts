@@ -5,6 +5,7 @@ import {
   createDriftSamples,
   createSlaveDriftSamples,
   hasSameMeasurementParticipants,
+  mapGlobalTimeToMeasurementTargets,
   summarizeDrift,
 } from "./drift-measurement";
 
@@ -49,6 +50,42 @@ describe("drift measurement", () => {
 
     expect(sample.expectedLocalTime).toBe(10);
     expect(sample.errorSeconds).toBeCloseTo(0.25);
+  });
+
+  it("maps a global seek through the frozen camera offsets", () => {
+    const baseline = createMeasurementBaseline(12, [
+      { id: "camera-a", actualLocalTime: 12 },
+      { id: "camera-b", actualLocalTime: 10.5 },
+      { id: "camera-c", actualLocalTime: 11.25 },
+    ]);
+
+    expect(
+      mapGlobalTimeToMeasurementTargets(
+        baseline,
+        ["camera-a", "camera-b", "camera-c"],
+        20,
+      ),
+    ).toEqual({
+      "camera-a": 20,
+      "camera-b": 18.5,
+      "camera-c": 19.25,
+    });
+  });
+
+  it("rejects global target mapping when the participant set changed", () => {
+    const baseline = createMeasurementBaseline(12, [
+      { id: "camera-a", actualLocalTime: 12 },
+      { id: "camera-b", actualLocalTime: 10.5 },
+      { id: "camera-c", actualLocalTime: 11.25 },
+    ]);
+
+    expect(
+      mapGlobalTimeToMeasurementTargets(
+        baseline,
+        ["camera-a", "camera-b", "camera-d"],
+        20,
+      ),
+    ).toBeNull();
   });
 
   it("rejects a participant set that does not match the frozen baseline", () => {

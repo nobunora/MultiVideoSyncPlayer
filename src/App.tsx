@@ -16,6 +16,7 @@ import {
   createSlaveDriftSamples,
   DriftRecorder,
   hasSameMeasurementParticipants,
+  mapGlobalTimeToMeasurementTargets,
   summarizeDrift,
   type DriftSummary,
   type MeasurementBaseline,
@@ -157,7 +158,8 @@ function App() {
     }
 
     let activeBaseline = measurementBaseline.current;
-    if (activeBaseline && !hasSameMeasurementParticipants(activeBaseline, assets.map((asset) => asset.id))) {
+    const participantIds = assets.map((asset) => asset.id);
+    if (activeBaseline && !hasSameMeasurementParticipants(activeBaseline, participantIds)) {
       clearMeasurement("Measurement baseline reset because the participant set changed.");
       activeBaseline = null;
     }
@@ -171,20 +173,22 @@ function App() {
     }
     const masterTime = masterController.getCurrentTime();
 
-    const baselineBeforeOffsetCheck = activeBaseline;
-    if (baselineBeforeOffsetCheck && assets.some((asset) => !Number.isFinite(baselineBeforeOffsetCheck.offsets[asset.id]))) {
-      clearMeasurement("Measurement baseline reset because an active participant has no frozen offset.");
-      activeBaseline = null;
+    const mappedTargets = activeBaseline
+      ? mapGlobalTimeToMeasurementTargets(activeBaseline, participantIds, masterTime)
+      : null;
+    if (activeBaseline && !mappedTargets) {
+      clearMeasurement("Measurement baseline reset because its frozen offsets are invalid.");
+      setIsPlaying(false);
+      return;
     }
 
-    const playbackBaseline = activeBaseline;
     const participants = assets.flatMap((asset) => {
       const controller = mediaControllers.current[asset.id];
       if (!controller) return [];
       return [{
         id: asset.id,
         controller,
-        targetTime: playbackBaseline ? masterTime - playbackBaseline.offsets[asset.id] : masterTime,
+        targetTime: mappedTargets?.[asset.id] ?? masterTime,
       }];
     });
     if (participants.length !== assets.length) {
@@ -204,18 +208,38 @@ function App() {
   }, [assets, clearMeasurement]);
 
   const seekAll = useCallback((target: number) => {
+    const participantIds = assets.map((asset) => asset.id);
+    let activeBaseline = measurementBaseline.current;
+    if (activeBaseline && !hasSameMeasurementParticipants(activeBaseline, participantIds)) {
+      clearMeasurement("Measurement baseline reset because the participant set changed.");
+      activeBaseline = null;
+    }
+
+    const mappedTargets = activeBaseline
+      ? mapGlobalTimeToMeasurementTargets(activeBaseline, participantIds, target)
+      : null;
+    if (activeBaseline && !mappedTargets) {
+      clearMeasurement("Measurement baseline reset because its frozen offsets are invalid.");
+      return;
+    }
+
     const participants = assets.flatMap((asset) => {
       const controller = mediaControllers.current[asset.id];
       if (!controller) return [];
-      return [{ id: asset.id, controller, targetTime: target }];
+      return [{
+        id: asset.id,
+        controller,
+        targetTime: mappedTargets?.[asset.id] ?? target,
+      }];
     });
     if (participants.length !== assets.length) {
       setMessage("Wait until every loaded video element is ready before a global seek.");
       return;
     }
 
-    if (measurementBaseline.current !== null) {
-      clearMeasurement("Measurement baseline was reset after a global seek.");
+    if (activeBaseline && isMeasuring) {
+      setIsMeasuring(false);
+      setMessage("Global seek started; drift measurement paused while the current camera alignment is preserved.");
     }
 
     const previous = pendingSeek.current ?? Promise.resolve();
@@ -225,13 +249,18 @@ function App() {
       () => {
         if (pendingSeek.current === operation) pendingSeek.current = null;
         setGlobalTime(target);
+        setMessage(
+          activeBaseline
+            ? "Global seek completed with the current camera alignment preserved."
+            : "Global seek completed.",
+        );
       },
       () => {
         if (pendingSeek.current === operation) pendingSeek.current = null;
         setMessage("One or more videos could not complete the global seek.");
       },
     );
-  }, [assets, clearMeasurement]);
+  }, [assets, clearMeasurement, isMeasuring]);
 
   const capture = useCallback(async (asset: VideoAsset) => {
     const video = videoRefs.current[asset.id];

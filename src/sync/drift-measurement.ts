@@ -52,6 +52,26 @@ export function hasSameMeasurementParticipants(
     baseline.videoIds.every((id, index) => id === participantIds[index]);
 }
 
+export function mapGlobalTimeToMeasurementTargets(
+  baseline: MeasurementBaseline,
+  participantIds: string[],
+  globalTime: number,
+): Record<string, number> | null {
+  if (!Number.isFinite(globalTime) || !hasSameMeasurementParticipants(baseline, participantIds)) {
+    return null;
+  }
+
+  const targets: Record<string, number> = {};
+  for (const id of participantIds) {
+    const offsetSeconds = baseline.offsets[id];
+    if (!Number.isFinite(offsetSeconds)) return null;
+    const targetTime = globalTime - offsetSeconds;
+    if (!Number.isFinite(targetTime)) return null;
+    targets[id] = targetTime;
+  }
+  return targets;
+}
+
 export function applyMeasurementBaseline(
   baseline: MeasurementBaseline,
   readings: MeasurementReading[],

@@ -51,10 +51,10 @@ function fakeController(currentTime: number, seekOperation: Promise<void>): Medi
 }
 
 describe("synchronized playback", () => {
-  it("preserves frozen per-participant local targets during start/resume", async () => {
-    const master = fakeController(12, Promise.resolve());
-    const slaveB = fakeController(10.5, Promise.resolve());
-    const slaveC = fakeController(11.25, Promise.resolve());
+  it("uses the frozen per-participant local targets instead of normalizing slaves to the master time", async () => {
+    const master = fakeController(11.5, Promise.resolve());
+    const slaveB = fakeController(10.0, Promise.resolve());
+    const slaveC = fakeController(10.75, Promise.resolve());
 
     await startSynchronizedPlayback(
       [
@@ -62,13 +62,12 @@ describe("synchronized playback", () => {
         { id: "camera-b", controller: slaveB, targetTime: 10.5 },
         { id: "camera-c", controller: slaveC, targetTime: 11.25 },
       ],
-      12,
       0.1,
     );
 
-    expect(master.seekTargets).toEqual([]);
-    expect(slaveB.seekTargets).toEqual([]);
-    expect(slaveC.seekTargets).toEqual([]);
+    expect(master.seekTargets).toEqual([12]);
+    expect(slaveB.seekTargets).toEqual([10.5]);
+    expect(slaveC.seekTargets).toEqual([11.25]);
     expect([master.playCalls, slaveB.playCalls, slaveC.playCalls]).toEqual([1, 1, 1]);
   });
 
@@ -79,10 +78,9 @@ describe("synchronized playback", () => {
     const second = fakeController(4, secondSeek.promise);
     const playback = startSynchronizedPlayback(
       [
-        { id: "camera-a", controller: first },
-        { id: "camera-b", controller: second },
+        { id: "camera-a", controller: first, targetTime: 5 },
+        { id: "camera-b", controller: second, targetTime: 5 },
       ],
-      5,
       0.1,
     );
 
@@ -109,10 +107,9 @@ describe("synchronized playback", () => {
     await expect(
       startSynchronizedPlayback(
         [
-          { id: "camera-a", controller: first },
-          { id: "camera-b", controller: second },
+          { id: "camera-a", controller: first, targetTime: 5 },
+          { id: "camera-b", controller: second, targetTime: 5 },
         ],
-        5,
         0.1,
       ),
     ).rejects.toThrow("could not seek");
@@ -147,14 +144,26 @@ describe("synchronized playback", () => {
     await expect(
       startSynchronizedPlayback(
         [
-          { id: "camera-a", controller: first },
-          { id: "camera-b", controller: second },
+          { id: "camera-a", controller: first, targetTime: 5 },
+          { id: "camera-b", controller: second, targetTime: 5 },
         ],
-        5,
         0.1,
       ),
     ).rejects.toThrow("rolled back");
     expect(first.pauseCalls).toBe(1);
     expect(second.pauseCalls).toBe(1);
+  });
+
+  it("rejects an invalid seek tolerance before any media operation", async () => {
+    const controller = fakeController(0, Promise.resolve());
+
+    await expect(
+      startSynchronizedPlayback(
+        [{ id: "camera-a", controller, targetTime: 1 }],
+        -0.1,
+      ),
+    ).rejects.toThrow("finite non-negative");
+    expect(controller.seekTargets).toEqual([]);
+    expect(controller.playCalls).toBe(0);
   });
 });

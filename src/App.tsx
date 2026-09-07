@@ -136,7 +136,8 @@ function App() {
     }
     const masterTime = masterController.getCurrentTime();
 
-    if (activeBaseline && assets.some((asset) => !Number.isFinite(activeBaseline.offsets[asset.id]))) {
+    const baselineBeforeOffsetCheck = activeBaseline;
+    if (baselineBeforeOffsetCheck && assets.some((asset) => !Number.isFinite(baselineBeforeOffsetCheck.offsets[asset.id]))) {
       measurementBaseline.current = null;
       recorder.current.reset();
       setDriftSummary(recorder.current.summary());
@@ -145,13 +146,14 @@ function App() {
       activeBaseline = null;
     }
 
+    const playbackBaseline = activeBaseline;
     const participants = assets.flatMap((asset) => {
       const controller = mediaControllers.current[asset.id];
       if (!controller) return [];
       return [{
         id: asset.id,
         controller,
-        targetTime: activeBaseline ? masterTime - activeBaseline.offsets[asset.id] : masterTime,
+        targetTime: playbackBaseline ? masterTime - playbackBaseline.offsets[asset.id] : masterTime,
       }];
     });
     if (participants.length !== assets.length) {

@@ -50,7 +50,7 @@ This document records the bounded first implementation cut described in `.codex/
 
 Fixture: `tmp/phase0/synthetic-30fps.mp4`, generated with `scripts/generate-test-video.ps1` and FFmpeg 8.1.1 Essentials. The fixture is ignored and is not committed.
 
-Last verified result before the final direct review-hardening change:
+Current direct review-hardening result:
 
 ```text
 video_track_count: 1
@@ -62,7 +62,7 @@ frame_duration_seconds: 0.03333333333333333
 cfr: true
 ```
 
-The parser is fed only requested ranges. A hard per-request safety limit of 64 MiB rejects an unbounded or oversized `RequiredInput` instead of allocating the remaining multi-GB file. The fixture must be regenerated and reparsed on the new head before Ready review.
+The fixture was regenerated on the current Windows head with `scripts/generate-test-video.ps1` using an explicit ignored output path, then parsed through the targeted Rust test with `MVSP_PHASE0_FIXTURE`. The parser is fed only requested ranges. A hard per-request safety limit of 64 MiB rejects an unbounded or oversized `RequiredInput` instead of allocating the remaining multi-GB file.
 
 ## Capture and drift evidence
 
@@ -88,9 +88,9 @@ WebView2 runtime present
 FFmpeg 8.1.1 Essentials (developer fixture generation only)
 ```
 
-## Verification required after direct review hardening
+## Verification status after direct review hardening
 
-The prior `68c8fe5` head passed 12 TypeScript tests, 7 Rust tests, typecheck/lint/build/fmt/clippy, Tauri dev startup, synthetic MP4 parsing, and MSI/NSIS packaging. Those results are historical evidence only and are **not claimed for the new head** after the explicit-target playback changes.
+The prior `68c8fe5` results were treated as historical and the complete set was rerun after the explicit-target playback changes. A local nullable-baseline compile fix was included before the final successful run.
 
 Run on Windows from the repository root:
 
@@ -115,9 +115,12 @@ $env:MVSP_PHASE0_FIXTURE = (Resolve-Path "tmp/phase0/synthetic-30fps.mp4").Path
 & "$env:USERPROFILE\.cargo\bin\cargo.exe" test --manifest-path src-tauri/Cargo.toml validates_phase0_fixture_when_requested -- --nocapture
 ```
 
-Expected automated result count after the added regression test is **at least 13 TypeScript tests** and 7 Rust tests. Record the actual counts and exact command outcomes rather than assuming them.
+Current results: 13 TypeScript tests passed, 7 Rust tests passed, typecheck/lint/build/fmt/clippy passed, Tauri dev reached Vite ready + Rust debug application launch, the regenerated fixture parsed as `avc1`, 3.0 seconds, 90 samples, 0.03333333333333333 seconds/frame, CFR, and `npm run tauri build` produced both MSI and NSIS installers:
 
-After the commands pass, update this section and the PR body with the new head SHA and exact results.
+- `src-tauri/target/release/bundle/msi/MultiVideoSyncPlayer_0.1.0_x64_en-US.msi`
+- `src-tauri/target/release/bundle/nsis/MultiVideoSyncPlayer_0.1.0_x64-setup.exe`
+
+No CI/status checks are published for this repository.
 
 Manual acceptance delegated to Windows remains:
 

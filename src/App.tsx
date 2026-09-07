@@ -15,6 +15,7 @@ import {
   createMeasurementBaseline,
   createSlaveDriftSamples,
   DriftRecorder,
+  getMeasurementGlobalTimeRange,
   hasSameMeasurementParticipants,
   mapGlobalTimeToMeasurementTargets,
   summarizeDrift,
@@ -45,10 +46,25 @@ function App() {
   const measurementBaseline = useRef<MeasurementBaseline | null>(null);
   const recorder = useRef(new DriftRecorder());
 
-  const maxDuration = useMemo(
-    () => assets.reduce((maximum, asset) => Math.max(maximum, asset.duration), 0),
-    [assets],
-  );
+  const timelineRange = useMemo(() => {
+    if (assets.length === 0) return { min: 0, max: 1 };
+    if (assets.some((asset) => !Number.isFinite(asset.duration) || asset.duration <= 0)) {
+      return { min: 0, max: 1 };
+    }
+
+    const baseline = measurementBaseline.current;
+    if (baseline && hasMeasurementBaseline) {
+      return getMeasurementGlobalTimeRange(
+        baseline,
+        assets.map((asset) => ({ id: asset.id, duration: asset.duration })),
+      ) ?? { min: 0, max: 0 };
+    }
+
+    return {
+      min: 0,
+      max: Math.min(...assets.map((asset) => asset.duration)),
+    };
+  }, [assets, hasMeasurementBaseline]);
 
   const updateAsset = useCallback((id: string, update: Partial<VideoAsset>) => {
     setAssets((current) => current.map((asset) => (asset.id === id ? { ...asset, ...update } : asset)));
@@ -398,15 +414,17 @@ function App() {
         <button type="button" onClick={() => void playAll()} disabled={assets.length === 0 || isPlaying}>Play all</button>
         <button type="button" onClick={pauseAll} disabled={assets.length === 0 || !isPlaying}>Pause all</button>
         <label className="timeline-control">
-          <span>Global time {formatSeconds(globalTime)}</span>
+          <span>
+            Global time {formatSeconds(globalTime)} · usable range {formatSeconds(timelineRange.min)}–{formatSeconds(timelineRange.max)}
+          </span>
           <input
             type="range"
-            min="0"
-            max={maxDuration || 1}
+            min={timelineRange.min}
+            max={timelineRange.max || 1}
             step="0.001"
-            value={Math.min(globalTime, maxDuration || 1)}
+            value={Math.min(Math.max(globalTime, timelineRange.min), timelineRange.max || 1)}
             onChange={(event) => seekAll(Number(event.currentTarget.value))}
-            disabled={assets.length === 0}
+            disabled={assets.length === 0 || timelineRange.max <= timelineRange.min}
           />
         </label>
       </section>

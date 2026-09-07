@@ -31,6 +31,16 @@ export interface MeasurementBaseline {
   offsets: Record<string, number>;
 }
 
+export interface MeasurementDuration {
+  id: string;
+  duration: number;
+}
+
+export interface GlobalTimeRange {
+  min: number;
+  max: number;
+}
+
 export function createMeasurementBaseline(
   globalTime: number,
   readings: MeasurementReading[],
@@ -70,6 +80,30 @@ export function mapGlobalTimeToMeasurementTargets(
     targets[id] = targetTime;
   }
   return targets;
+}
+
+export function getMeasurementGlobalTimeRange(
+  baseline: MeasurementBaseline,
+  videos: MeasurementDuration[],
+): GlobalTimeRange | null {
+  const participantIds = videos.map((video) => video.id);
+  if (!hasSameMeasurementParticipants(baseline, participantIds) || videos.length === 0) {
+    return null;
+  }
+
+  let min = Number.NEGATIVE_INFINITY;
+  let max = Number.POSITIVE_INFINITY;
+  for (const video of videos) {
+    const offsetSeconds = baseline.offsets[video.id];
+    if (!Number.isFinite(offsetSeconds) || !Number.isFinite(video.duration) || video.duration <= 0) {
+      return null;
+    }
+    min = Math.max(min, offsetSeconds);
+    max = Math.min(max, offsetSeconds + video.duration);
+  }
+
+  if (!Number.isFinite(min) || !Number.isFinite(max) || min > max) return null;
+  return { min, max };
 }
 
 export function applyMeasurementBaseline(

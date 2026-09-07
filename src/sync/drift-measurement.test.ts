@@ -4,6 +4,7 @@ import {
   createMeasurementBaseline,
   createDriftSamples,
   createSlaveDriftSamples,
+  getMeasurementGlobalTimeRange,
   hasSameMeasurementParticipants,
   mapGlobalTimeToMeasurementTargets,
   summarizeDrift,
@@ -70,6 +71,45 @@ describe("drift measurement", () => {
       "camera-b": 18.5,
       "camera-c": 19.25,
     });
+  });
+
+  it("limits global seek to the overlap of all aligned local timelines", () => {
+    const baseline = createMeasurementBaseline(12, [
+      { id: "camera-a", actualLocalTime: 12 },
+      { id: "camera-b", actualLocalTime: 10.5 },
+      { id: "camera-c", actualLocalTime: 11.25 },
+    ]);
+
+    expect(
+      getMeasurementGlobalTimeRange(baseline, [
+        { id: "camera-a", duration: 30 },
+        { id: "camera-b", duration: 25 },
+        { id: "camera-c", duration: 40 },
+      ]),
+    ).toEqual({ min: 1.5, max: 26.5 });
+  });
+
+  it("rejects a global range when the participant set or duration data is invalid", () => {
+    const baseline = createMeasurementBaseline(12, [
+      { id: "camera-a", actualLocalTime: 12 },
+      { id: "camera-b", actualLocalTime: 10.5 },
+      { id: "camera-c", actualLocalTime: 11.25 },
+    ]);
+
+    expect(
+      getMeasurementGlobalTimeRange(baseline, [
+        { id: "camera-a", duration: 30 },
+        { id: "camera-b", duration: 25 },
+        { id: "camera-d", duration: 40 },
+      ]),
+    ).toBeNull();
+    expect(
+      getMeasurementGlobalTimeRange(baseline, [
+        { id: "camera-a", duration: 30 },
+        { id: "camera-b", duration: 0 },
+        { id: "camera-c", duration: 40 },
+      ]),
+    ).toBeNull();
   });
 
   it("rejects global target mapping when the participant set changed", () => {

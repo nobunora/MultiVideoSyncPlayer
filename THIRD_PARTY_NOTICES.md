@@ -1,6 +1,17 @@
 # Third-Party Notices and Prior Art
 
-MultiVideoSyncPlayer is an independent project.
+MultiVideoSyncPlayer is an independent project. The application does not copy source code from the prior-art projects below.
+
+## Direct runtime/development dependencies
+
+| Dependency | Resolved version | License | Purpose | Runtime network | Decision |
+| --- | --- | --- | --- | --- | --- |
+| Tauri | 2.11.5 | MIT/Apache-2.0 | Windows desktop shell, asset protocol, IPC | No | Keep |
+| `@tauri-apps/plugin-dialog` / `tauri-plugin-dialog` | 2.7.3 | MIT/Apache-2.0 | Native file and capture-path dialogs | No | Keep |
+| `shiguredo_mp4` | 2026.5.0 | Apache-2.0 | Incremental MP4 track/sample timing inspection | No | Keep after Phase 0 spike |
+| React / Vite / Vitest / ESLint | resolved in lockfiles | MIT/Apache-2.0 or project licenses | UI, bundling, tests, static checks | No | Keep |
+
+FFmpeg is a developer-installed test-fixture generator only. It is not a package dependency or application runtime component.
 
 At the time this notice was created, the repository contains planning/specification material only and does not intentionally include copied source code from the projects listed below. These projects influenced requirements, interaction ideas, or technical investigation.
 

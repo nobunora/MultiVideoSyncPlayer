@@ -1,0 +1,189 @@
+import { describe, expect, it } from "vitest";
+import {
+  applyMeasurementBaseline,
+  createMeasurementBaseline,
+  createDriftSamples,
+  createSlaveDriftSamples,
+  getMeasurementGlobalTimeRange,
+  hasSameMeasurementParticipants,
+  mapGlobalTimeToMeasurementTargets,
+  summarizeDrift,
+} from "./drift-measurement";
+
+describe("drift measurement", () => {
+  it("freezes non-zero starting offsets so the initial aligned state has no drift", () => {
+    const baseline = createMeasurementBaseline(12, [
+      { id: "camera-a", actualLocalTime: 12 },
+      { id: "camera-b", actualLocalTime: 10.5 },
+      { id: "camera-c", actualLocalTime: 11.25 },
+    ]);
+    const initialSamples = createSlaveDriftSamples(
+      0,
+      12,
+      "camera-a",
+      applyMeasurementBaseline(baseline, [
+        { id: "camera-a", actualLocalTime: 12 },
+        { id: "camera-b", actualLocalTime: 10.5 },
+        { id: "camera-c", actualLocalTime: 11.25 },
+      ])!,
+    );
+
+    expect(baseline.offsets).toEqual({ "camera-a": 0, "camera-b": 1.5, "camera-c": 0.75 });
+    expect(summarizeDrift(initialSamples).maxAbsoluteError).toBe(0);
+
+    const laterSamples = createSlaveDriftSamples(
+      250,
+      12.25,
+      "camera-a",
+      applyMeasurementBaseline(baseline, [
+        { id: "camera-a", actualLocalTime: 12.25 },
+        { id: "camera-b", actualLocalTime: 10.73 },
+        { id: "camera-c", actualLocalTime: 11.48 },
+      ])!,
+    );
+    expect(summarizeDrift(laterSamples).maxAbsoluteError).toBeCloseTo(0.02);
+  });
+
+  it("maps global time to expected local time using the frozen offset sign", () => {
+    const [sample] = createDriftSamples(250, 12, [
+      { id: "camera-a", offsetSeconds: 2, actualLocalTime: 10.25 },
+    ]);
+
+    expect(sample.expectedLocalTime).toBe(10);
+    expect(sample.errorSeconds).toBeCloseTo(0.25);
+  });
+
+  it("maps a global seek through the frozen camera offsets", () => {
+    const baseline = createMeasurementBaseline(12, [
+      { id: "camera-a", actualLocalTime: 12 },
+      { id: "camera-b", actualLocalTime: 10.5 },
+      { id: "camera-c", actualLocalTime: 11.25 },
+    ]);
+
+    expect(
+      mapGlobalTimeToMeasurementTargets(
+        baseline,
+        ["camera-a", "camera-b", "camera-c"],
+        20,
+      ),
+    ).toEqual({
+      "camera-a": 20,
+      "camera-b": 18.5,
+      "camera-c": 19.25,
+    });
+  });
+
+  it("limits global seek to the overlap of all aligned local timelines", () => {
+    const baseline = createMeasurementBaseline(12, [
+      { id: "camera-a", actualLocalTime: 12 },
+      { id: "camera-b", actualLocalTime: 10.5 },
+      { id: "camera-c", actualLocalTime: 11.25 },
+    ]);
+
+    expect(
+      getMeasurementGlobalTimeRange(baseline, [
+        { id: "camera-a", duration: 30 },
+        { id: "camera-b", duration: 25 },
+        { id: "camera-c", duration: 40 },
+      ]),
+    ).toEqual({ min: 1.5, max: 26.5 });
+  });
+
+  it("rejects a global range when the participant set or duration data is invalid", () => {
+    const baseline = createMeasurementBaseline(12, [
+      { id: "camera-a", actualLocalTime: 12 },
+      { id: "camera-b", actualLocalTime: 10.5 },
+      { id: "camera-c", actualLocalTime: 11.25 },
+    ]);
+
+    expect(
+      getMeasurementGlobalTimeRange(baseline, [
+        { id: "camera-a", duration: 30 },
+        { id: "camera-b", duration: 25 },
+        { id: "camera-d", duration: 40 },
+      ]),
+    ).toBeNull();
+    expect(
+      getMeasurementGlobalTimeRange(baseline, [
+        { id: "camera-a", duration: 30 },
+        { id: "camera-b", duration: 0 },
+        { id: "camera-c", duration: 40 },
+      ]),
+    ).toBeNull();
+  });
+
+  it("rejects global target mapping when the participant set changed", () => {
+    const baseline = createMeasurementBaseline(12, [
+      { id: "camera-a", actualLocalTime: 12 },
+      { id: "camera-b", actualLocalTime: 10.5 },
+      { id: "camera-c", actualLocalTime: 11.25 },
+    ]);
+
+    expect(
+      mapGlobalTimeToMeasurementTargets(
+        baseline,
+        ["camera-a", "camera-b", "camera-d"],
+        20,
+      ),
+    ).toBeNull();
+  });
+
+  it("rejects a participant set that does not match the frozen baseline", () => {
+    const baseline = createMeasurementBaseline(12, [
+      { id: "camera-a", actualLocalTime: 12 },
+      { id: "camera-b", actualLocalTime: 10.5 },
+      { id: "camera-c", actualLocalTime: 11.25 },
+    ]);
+
+    expect(hasSameMeasurementParticipants(baseline, ["camera-a", "camera-b", "camera-c"])).toBe(true);
+    expect(hasSameMeasurementParticipants(baseline, ["camera-a", "camera-b", "camera-d"])).toBe(false);
+    expect(applyMeasurementBaseline(baseline, [
+      { id: "camera-a", actualLocalTime: 12 },
+      { id: "camera-b", actualLocalTime: 10.5 },
+      { id: "camera-d", actualLocalTime: 11.25 },
+    ])).toBeNull();
+  });
+
+  it("excludes the master stream from aggregate drift samples", () => {
+    const samples = createSlaveDriftSamples(250, 12, "camera-a", [
+      { id: "camera-a", offsetSeconds: 0, actualLocalTime: 12 },
+      { id: "camera-b", offsetSeconds: 0, actualLocalTime: 12.03 },
+      { id: "camera-c", offsetSeconds: 0, actualLocalTime: 11.98 },
+    ]);
+
+    expect(samples.map((sample) => sample.videoId)).toEqual(["camera-b", "camera-c"]);
+    expect(summarizeDrift(samples).sampleCount).toBe(2);
+  });
+
+  it("summarizes median, p95, and maximum absolute error", () => {
+    const samples = [0.01, -0.03, 0.02, -0.08].map((errorSeconds, index) => ({
+      sampleTimeMs: index * 250,
+      globalTime: index,
+      videoId: "camera-a",
+      expectedLocalTime: 0,
+      actualLocalTime: errorSeconds,
+      errorSeconds,
+    }));
+
+    const summary = summarizeDrift(samples);
+    expect(summary.sampleCount).toBe(4);
+    expect(summary.medianAbsoluteError).toBeCloseTo(0.025, 10);
+    expect(summary.p95AbsoluteError).toBeCloseTo(0.0725, 10);
+    expect(summary.maxAbsoluteError).toBeCloseTo(0.08, 10);
+  });
+
+  it("ignores non-finite error values in the summary", () => {
+    expect(
+      summarizeDrift([
+        {
+          sampleTimeMs: 0,
+          globalTime: 0,
+          videoId: "camera-a",
+          expectedLocalTime: 0,
+          actualLocalTime: Number.NaN,
+          errorSeconds: Number.NaN,
+        },
+      ]),
+    ).toMatchObject({ sampleCount: 0, maxAbsoluteError: 0 });
+  });
+});

@@ -63,8 +63,8 @@ These choices are explained in `docs/architecture/preimplementation-decisions.md
 
 ## Status
 
-**Implementation-ready.**
+**Foundation implementation in progress.**
 
 The specification is approved, repository review disposition is `validated`, architecture decisions are frozen, and the first bounded Codex implementation task is written in `.codex/next-task.md`.
 
-No production source has been implemented yet. The next change should be the first source-bearing PR, not another architecture redesign.
+The first source-bearing cut contains the Tauri/React foundation, direct local MP4 playback, the MP4 timing parser spike, native-resolution Canvas capture, and a developer-visible three-video drift measurement path. Final synchronization controls, project persistence, frame stepping, and polished capture UI remain out of scope for this cut.

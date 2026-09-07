@@ -7,10 +7,10 @@ describe("captureCurrentFrame", () => {
       width: 0,
       height: 0,
       getContext: vi.fn(() => ({ drawImage: vi.fn() })),
-      toDataURL: vi.fn(() => "data:image/png;base64,AAE=") ,
+      toDataURL: vi.fn(() => "data:image/png;base64,AAE="),
     } as unknown as HTMLCanvasElement;
     vi.stubGlobal("document", { createElement: vi.fn(() => canvas) });
-    const video = { videoWidth: 3840, videoHeight: 2160 } as HTMLVideoElement;
+    const video = { videoWidth: 3840, videoHeight: 2160, seeking: false } as HTMLVideoElement;
 
     const result = captureCurrentFrame(video);
 
@@ -18,5 +18,11 @@ describe("captureCurrentFrame", () => {
     expect(result.height).toBe(2160);
     expect(canvas.width).toBe(3840);
     expect(canvas.height).toBe(2160);
+  });
+
+  it("rejects capture while a video seek is still unsettled", () => {
+    const video = { videoWidth: 3840, videoHeight: 2160, seeking: true } as HTMLVideoElement;
+
+    expect(() => captureCurrentFrame(video)).toThrow("seek has settled");
   });
 });

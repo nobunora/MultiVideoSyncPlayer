@@ -13,6 +13,9 @@ function dataUrlToBytes(dataUrl: string): number[] {
 }
 
 export function captureCurrentFrame(video: HTMLVideoElement): CapturedFrame {
+  if (video.seeking) {
+    throw new Error("Wait until the video seek has settled before capturing a frame.");
+  }
   if (video.videoWidth <= 0 || video.videoHeight <= 0) {
     throw new Error("The video has no decoded frame dimensions yet.");
   }

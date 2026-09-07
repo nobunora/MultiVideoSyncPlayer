@@ -63,6 +63,10 @@ function App() {
   }, []);
 
   const addVideos = useCallback(async () => {
+    if (pendingSeek.current) {
+      setMessage("Wait for the current global seek to finish before changing the video set.");
+      return;
+    }
     if (assets.length >= MAX_VIDEOS) {
       setMessage(`The foundation currently supports up to ${MAX_VIDEOS} videos.`);
       return;
@@ -103,6 +107,11 @@ function App() {
 
       const valid = prepared.filter((result): result is VideoAsset => "id" in result);
       const invalid = prepared.filter((result): result is LoadError => "error" in result);
+      if (valid.length > 0) {
+        Object.values(mediaControllers.current).forEach((controller) => controller?.pause());
+        setIsPlaying(false);
+        if (measurementBaseline.current !== null) clearMeasurement();
+      }
       setAssets((current) => [...current, ...valid]);
       setLoadErrors((current) => [...current, ...invalid]);
       setMessage(
@@ -115,7 +124,7 @@ function App() {
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "The native file picker failed.");
     }
-  }, [assets.length]);
+  }, [assets.length, clearMeasurement]);
 
   const pauseAll = useCallback(() => {
     Object.values(mediaControllers.current).forEach((controller) => controller?.pause());
@@ -133,6 +142,10 @@ function App() {
       readyControllers.every((controller) => !controller.isPaused()),
     );
   }, [assets]);
+
+  useEffect(() => {
+    refreshPlaybackState();
+  }, [refreshPlaybackState]);
 
   const playAll = useCallback(async () => {
     try {
@@ -240,6 +253,24 @@ function App() {
     if (isMeasuring) {
       setIsMeasuring(false);
       setMessage("Drift measurement paused; its starting baseline is preserved.");
+      return;
+    }
+
+    if (pendingSeek.current) {
+      setMessage("Wait for the current global seek to finish before starting or resuming drift measurement.");
+      return;
+    }
+
+    const controllers = assets.flatMap((asset) => {
+      const controller = mediaControllers.current[asset.id];
+      return controller ? [controller] : [];
+    });
+    if (controllers.length !== assets.length) {
+      setMessage("Wait until every loaded video element is ready before measuring drift.");
+      return;
+    }
+    if (controllers.some((controller) => controller.isSeeking?.() === true)) {
+      setMessage("Wait until all video seeks have settled before starting or resuming drift measurement.");
       return;
     }
 

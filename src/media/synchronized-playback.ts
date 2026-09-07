@@ -14,13 +14,7 @@ function failedOperationMessage(operation: "seek" | "play"): Error {
   );
 }
 
-export async function startSynchronizedPlayback(
-  participants: PlaybackParticipant[],
-  toleranceSeconds: number,
-): Promise<void> {
-  if (!Number.isFinite(toleranceSeconds) || toleranceSeconds < 0) {
-    throw new Error("Playback seek tolerance must be a finite non-negative value.");
-  }
+function validatePlaybackParticipants(participants: PlaybackParticipant[]): void {
   if (participants.length === 0) {
     throw new Error("At least one playback participant is required.");
   }
@@ -34,11 +28,17 @@ export async function startSynchronizedPlayback(
       throw new Error(`Playback target for ${id} is outside the playable media range.`);
     }
   }
+}
 
+async function settleParticipantSeeks(
+  participants: PlaybackParticipant[],
+  toleranceSeconds?: number,
+): Promise<void> {
   const seekResults = await Promise.allSettled(
     participants.map(async ({ controller, targetTime }) => {
       const currentTime = controller.getCurrentTime();
       const needsSeek =
+        toleranceSeconds === undefined ||
         !Number.isFinite(currentTime) ||
         Math.abs(currentTime - targetTime) > toleranceSeconds ||
         controller.isSeeking?.() === true;
@@ -52,6 +52,25 @@ export async function startSynchronizedPlayback(
   if (seekResults.some((result) => result.status === "rejected")) {
     throw failedOperationMessage("seek");
   }
+}
+
+export async function seekPlaybackParticipants(
+  participants: PlaybackParticipant[],
+): Promise<void> {
+  validatePlaybackParticipants(participants);
+  await settleParticipantSeeks(participants);
+}
+
+export async function startSynchronizedPlayback(
+  participants: PlaybackParticipant[],
+  toleranceSeconds: number,
+): Promise<void> {
+  if (!Number.isFinite(toleranceSeconds) || toleranceSeconds < 0) {
+    throw new Error("Playback seek tolerance must be a finite non-negative value.");
+  }
+
+  validatePlaybackParticipants(participants);
+  await settleParticipantSeeks(participants, toleranceSeconds);
 
   const playResults = await Promise.allSettled(
     participants.map(({ controller }) => controller.play()),

@@ -4,7 +4,10 @@ import { captureCurrentFrame } from "./capture/capture-frame";
 import { MeasurementPanel } from "./components/measurement-panel";
 import { VideoGrid, type LoadError, type VideoAsset } from "./components/video-grid";
 import { HtmlVideoController, type MediaController } from "./media/media-controller";
-import { startSynchronizedPlayback } from "./media/synchronized-playback";
+import {
+  seekPlaybackParticipants,
+  startSynchronizedPlayback,
+} from "./media/synchronized-playback";
 import { selectCaptureOutputPath, writePngFile } from "./platform/tauri-capture";
 import { inspectLocalMp4Timing, prepareLocalVideoFile, selectLocalVideoPaths } from "./platform/tauri-media";
 import {
@@ -188,24 +191,27 @@ function App() {
   }, [assets, clearMeasurement]);
 
   const seekAll = useCallback((target: number) => {
-    setGlobalTime(target);
+    const participants = assets.flatMap((asset) => {
+      const controller = mediaControllers.current[asset.id];
+      if (!controller) return [];
+      return [{ id: asset.id, controller, targetTime: target }];
+    });
+    if (participants.length !== assets.length) {
+      setMessage("Wait until every loaded video element is ready before a global seek.");
+      return;
+    }
+
     if (measurementBaseline.current !== null) {
       clearMeasurement("Measurement baseline was reset after a global seek.");
     }
 
     const previous = pendingSeek.current ?? Promise.resolve();
-    const operation = previous.catch(() => undefined).then(async () => {
-      const results = await Promise.allSettled(
-        assets.map((asset) => mediaControllers.current[asset.id]?.seek(target)),
-      );
-      if (results.some((result) => result.status === "rejected")) {
-        throw new Error("One or more videos could not complete the global seek.");
-      }
-    });
+    const operation = previous.catch(() => undefined).then(() => seekPlaybackParticipants(participants));
     pendingSeek.current = operation;
     void operation.then(
       () => {
         if (pendingSeek.current === operation) pendingSeek.current = null;
+        setGlobalTime(target);
       },
       () => {
         if (pendingSeek.current === operation) pendingSeek.current = null;

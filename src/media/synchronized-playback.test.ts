@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { startSynchronizedPlayback } from "./synchronized-playback";
+import {
+  seekPlaybackParticipants,
+  startSynchronizedPlayback,
+} from "./synchronized-playback";
 import type { MediaController } from "./media-controller";
 
 function deferred<T = void>(): { promise: Promise<T>; resolve: (value: T) => void; reject: (reason?: unknown) => void } {
@@ -187,6 +190,38 @@ describe("synchronized playback", () => {
         ],
         0.1,
       ),
+    ).rejects.toThrow("outside the playable media range");
+
+    expect(valid.seekTargets).toEqual([]);
+    expect(outOfRange.seekTargets).toEqual([]);
+    expect(valid.playCalls).toBe(0);
+    expect(outOfRange.playCalls).toBe(0);
+  });
+
+  it("seeks every participant to its explicit global-seek target without starting playback", async () => {
+    const first = fakeController(1, Promise.resolve(), 30);
+    const second = fakeController(2, Promise.resolve(), 30);
+
+    await seekPlaybackParticipants([
+      { id: "camera-a", controller: first, targetTime: 7 },
+      { id: "camera-b", controller: second, targetTime: 7 },
+    ]);
+
+    expect(first.seekTargets).toEqual([7]);
+    expect(second.seekTargets).toEqual([7]);
+    expect(first.playCalls).toBe(0);
+    expect(second.playCalls).toBe(0);
+  });
+
+  it("preflights global-seek targets before any participant is moved", async () => {
+    const valid = fakeController(1, Promise.resolve(), 30);
+    const outOfRange = fakeController(2, Promise.resolve(), 5);
+
+    await expect(
+      seekPlaybackParticipants([
+        { id: "camera-a", controller: valid, targetTime: 7 },
+        { id: "camera-b", controller: outOfRange, targetTime: 7 },
+      ]),
     ).rejects.toThrow("outside the playable media range");
 
     expect(valid.seekTargets).toEqual([]);

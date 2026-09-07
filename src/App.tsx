@@ -2,47 +2,23 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import "./App.css";
 import { captureCurrentFrame } from "./capture/capture-frame";
 import { chooseCapturePath, writeCapturePng } from "./capture/capture-io";
+import { MeasurementPanel } from "./components/measurement-panel";
+import { VideoGrid, type LoadError, type VideoAsset } from "./components/video-grid";
+import { inspectMp4Timing, prepareVideoFile, selectVideoPaths } from "./media/local-file";
+import { HtmlVideoController, type MediaController } from "./media/media-controller";
+import { startSynchronizedPlayback } from "./media/synchronized-playback";
 import {
-  inspectMp4Timing,
-  prepareVideoFile,
-  selectVideoPaths,
-  type Mp4TimingInfo,
-  type PreparedVideoFile,
-} from "./media/local-file";
-import {
-  HtmlVideoController,
-  type MediaController,
-} from "./media/media-controller";
-import {
-  createSlaveDriftSamples,
+  applyMeasurementBaseline,
+  createMeasurementBaseline,
   DriftRecorder,
   summarizeDrift,
   type DriftSummary,
+  type MeasurementBaseline,
 } from "./sync/drift-measurement";
-
-interface VideoAsset extends PreparedVideoFile {
-  id: string;
-  duration: number;
-  width: number;
-  height: number;
-  timing: Mp4TimingInfo | null;
-  timingError: string | null;
-  playbackError: string | null;
-}
-
-interface LoadError {
-  path: string;
-  error: string;
-}
 
 const SAMPLE_INTERVAL_MS = 250;
 const MAX_VIDEOS = 4;
 const PRE_PLAY_SEEK_TOLERANCE_SECONDS = 0.1;
-
-function fileNameFromPath(path: string): string {
-  const parts = path.split(/[\\/]/);
-  return parts[parts.length - 1] ?? path;
-}
 
 function formatSeconds(value: number): string {
   return Number.isFinite(value) ? `${value.toFixed(3)} s` : "—";
@@ -58,6 +34,8 @@ function App() {
   const [message, setMessage] = useState("Ready for local MP4 files.");
   const videoRefs = useRef<Record<string, HTMLVideoElement | null>>({});
   const mediaControllers = useRef<Record<string, MediaController | null>>({});
+  const pendingSeek = useRef<Promise<void> | null>(null);
+  const measurementBaseline = useRef<MeasurementBaseline | null>(null);
   const recorder = useRef(new DriftRecorder());
 
   const maxDuration = useMemo(
@@ -99,8 +77,9 @@ function App() {
             }
             return asset;
           } catch (error) {
+            const parts = path.split(/[\\/]/);
             return {
-              error: error instanceof Error ? error.message : `Could not open ${fileNameFromPath(path)}.`,
+              error: error instanceof Error ? error.message : `Could not open ${parts[parts.length - 1] ?? path}.`,
               path,
             };
           }
@@ -108,7 +87,7 @@ function App() {
       );
 
       const valid = prepared.filter((result): result is VideoAsset => "id" in result);
-      const invalid = prepared.filter((result): result is { error: string; path: string } => "error" in result);
+      const invalid = prepared.filter((result): result is LoadError => "error" in result);
       setAssets((current) => [...current, ...valid]);
       setLoadErrors((current) => [...current, ...invalid]);
       setMessage(
@@ -129,31 +108,66 @@ function App() {
   }, []);
 
   const playAll = useCallback(async () => {
+    try {
+      if (pendingSeek.current) await pendingSeek.current;
+    } catch {
+      setIsPlaying(false);
+      setMessage("Playback did not start because the previous global seek failed.");
+      return;
+    }
+
+    const participants = assets.flatMap((asset) => {
+      const controller = mediaControllers.current[asset.id];
+      return controller ? [{ id: asset.id, controller }] : [];
+    });
+    if (participants.length === 0) {
+      setIsPlaying(false);
+      setMessage("No video elements are ready to play.");
+      return;
+    }
+
     const masterController = mediaControllers.current[assets[0]?.id ?? ""];
     const masterTime = masterController?.getCurrentTime() ?? globalTime;
-    const results = await Promise.allSettled(
-      assets.map(async (asset) => {
-        const controller = mediaControllers.current[asset.id];
-        if (!controller) return;
-        if (Math.abs(controller.getCurrentTime() - masterTime) > PRE_PLAY_SEEK_TOLERANCE_SECONDS) {
-          await controller.seek(masterTime);
-        }
-        await controller.play();
-      }),
-    );
-    const rejected = results.filter((result) => result.status === "rejected");
-    setIsPlaying(rejected.length === 0 && assets.length > 0);
-    setMessage(rejected.length === 0 ? "Playback started on the local video elements." : "One or more videos could not play.");
+    try {
+      await startSynchronizedPlayback(participants, masterTime, PRE_PLAY_SEEK_TOLERANCE_SECONDS);
+      setIsPlaying(true);
+      setMessage("Playback started on the local video elements.");
+    } catch (error) {
+      setIsPlaying(false);
+      setMessage(error instanceof Error ? error.message : "Synchronized playback could not start.");
+    }
   }, [assets, globalTime]);
 
   const seekAll = useCallback((target: number) => {
     setGlobalTime(target);
-    const seeks = assets.map((asset) => {
-      const controller = mediaControllers.current[asset.id];
-      return controller ? controller.seek(target) : Promise.resolve();
+    if (isMeasuring) {
+      measurementBaseline.current = null;
+      recorder.current.reset();
+      setDriftSummary(recorder.current.summary());
+      setIsMeasuring(false);
+      setMessage("Measurement stopped and its baseline was reset after a global seek.");
+    }
+
+    const previous = pendingSeek.current ?? Promise.resolve();
+    const operation = previous.catch(() => undefined).then(async () => {
+      const results = await Promise.allSettled(
+        assets.map((asset) => mediaControllers.current[asset.id]?.seek(target)),
+      );
+      if (results.some((result) => result.status === "rejected")) {
+        throw new Error("One or more videos could not complete the global seek.");
+      }
     });
-    void Promise.allSettled(seeks);
-  }, [assets]);
+    pendingSeek.current = operation;
+    void operation.then(
+      () => {
+        if (pendingSeek.current === operation) pendingSeek.current = null;
+      },
+      () => {
+        if (pendingSeek.current === operation) pendingSeek.current = null;
+        setMessage("One or more videos could not complete the global seek.");
+      },
+    );
+  }, [assets, isMeasuring]);
 
   const capture = useCallback(async (asset: VideoAsset) => {
     const video = videoRefs.current[asset.id];
@@ -171,34 +185,79 @@ function App() {
     }
   }, []);
 
+  const toggleMeasurement = useCallback(() => {
+    if (isMeasuring) {
+      setIsMeasuring(false);
+      setMessage("Drift measurement paused; its starting baseline is preserved.");
+      return;
+    }
+
+    const ids = assets.map((asset) => asset.id);
+    const existingBaseline = measurementBaseline.current;
+    const canResume = existingBaseline !== null &&
+      existingBaseline.videoIds.length === ids.length &&
+      existingBaseline.videoIds.every((id, index) => id === ids[index]);
+    if (canResume) {
+      setIsMeasuring(true);
+      setMessage("Drift measurement resumed with its preserved starting baseline.");
+      return;
+    }
+
+    const master = assets[0];
+    const masterController = master ? mediaControllers.current[master.id] : null;
+    const global = masterController?.getCurrentTime() ?? Number.NaN;
+    const readings = assets.map((asset) => ({
+      id: asset.id,
+      actualLocalTime: mediaControllers.current[asset.id]?.getCurrentTime() ?? Number.NaN,
+    }));
+    if (!Number.isFinite(global) || readings.some((reading) => !Number.isFinite(reading.actualLocalTime))) {
+      setMessage("Wait until all three video elements have valid playback positions before measuring drift.");
+      return;
+    }
+
+    measurementBaseline.current = createMeasurementBaseline(global, readings);
+    recorder.current.reset();
+    setDriftSummary(recorder.current.summary());
+    setIsMeasuring(true);
+    setMessage("Drift measurement started with a frozen local-time baseline.");
+  }, [assets, isMeasuring]);
+
   useEffect(() => {
     if (!isMeasuring) return;
     const handle = window.setInterval(() => {
+      const baseline = measurementBaseline.current;
       const master = assets[0];
       const masterController = master ? mediaControllers.current[master.id] : null;
-      if (!master || !masterController) return;
-      const samples = createSlaveDriftSamples(
-        performance.now(),
-        masterController.getCurrentTime(),
-        master.id,
-        assets.map((asset) => ({
-          id: asset.id,
-          offsetSeconds: 0,
-          actualLocalTime: mediaControllers.current[asset.id]?.getCurrentTime() ?? Number.NaN,
-        })),
+      if (!baseline || !master || !masterController) return;
+
+      const global = masterController.getCurrentTime();
+      const readings = assets.map((asset) => ({
+        id: asset.id,
+        actualLocalTime: mediaControllers.current[asset.id]?.getCurrentTime() ?? Number.NaN,
+      }));
+      const samples = applyMeasurementBaseline(baseline, readings);
+      recorder.current.record(
+        samples
+          .filter((sample) => Number.isFinite(sample.actualLocalTime))
+          .flatMap((sample) => sample.id === master.id ? [] : [{
+            sampleTimeMs: performance.now(),
+            globalTime: global,
+            videoId: sample.id,
+            expectedLocalTime: global - sample.offsetSeconds,
+            actualLocalTime: sample.actualLocalTime,
+            errorSeconds: sample.actualLocalTime - (global - sample.offsetSeconds),
+          }]),
       );
-      recorder.current.record(samples);
       setDriftSummary(recorder.current.summary());
     }, SAMPLE_INTERVAL_MS);
 
     return () => window.clearInterval(handle);
   }, [assets, isMeasuring]);
 
-  const resetMeasurement = () => {
-    recorder.current.reset();
-    setDriftSummary(recorder.current.summary());
-    setIsMeasuring(false);
-  };
+  const setVideoElement = useCallback((id: string, element: HTMLVideoElement | null) => {
+    videoRefs.current[id] = element;
+    mediaControllers.current[id] = element ? new HtmlVideoController(element) : null;
+  }, []);
 
   return (
     <main className="app-shell">
@@ -231,85 +290,34 @@ function App() {
 
       <p className="status" role="status">{message}</p>
 
-      {loadErrors.length > 0 && (
-        <section className="load-errors" aria-label="Files that could not be loaded">
-          <strong>Files not loaded</strong>
-          {loadErrors.map((loadError) => (
-            <p key={`${loadError.path}-${loadError.error}`}><span>{fileNameFromPath(loadError.path)}</span> — {loadError.error}</p>
-          ))}
-        </section>
-      )}
+      <VideoGrid
+        assets={assets}
+        loadErrors={loadErrors}
+        onAddVideos={() => void addVideos()}
+        onCapture={(asset) => void capture(asset)}
+        onMetadata={(id, metadata) => updateAsset(id, metadata)}
+        onTimeUpdate={(id, currentTime) => {
+          if (id === assets[0]?.id) setGlobalTime(currentTime);
+        }}
+        onVideoElement={setVideoElement}
+        onVideoError={(id) => updateAsset(id, { playbackError: "WebView2 could not decode this file." })}
+        onVideoPause={() => setIsPlaying(false)}
+        onVideoPlay={() => setIsPlaying(true)}
+      />
 
-      <section className={`video-grid count-${Math.max(1, Math.min(4, assets.length))}`} aria-label="Video panes">
-        {assets.length === 0 ? (
-          <div className="empty-state">
-            <span className="empty-icon">＋</span>
-            <h2>Select up to four local MP4 files</h2>
-            <p>The source path is retained and authorized narrowly for this session. No full-file import is performed.</p>
-            <button className="primary" type="button" onClick={() => void addVideos()}>Choose local files</button>
-          </div>
-        ) : (
-          assets.map((asset, index) => (
-            <article className="video-card" key={asset.id}>
-              <div className="video-card-header">
-                <div>
-                  <span className="camera-label">CAMERA {index + 1}</span>
-                  <h2 title={asset.path}>{asset.fileName}</h2>
-                </div>
-                <span className="file-state">DIRECT FILE</span>
-              </div>
-              <video
-                ref={(element) => {
-                  videoRefs.current[asset.id] = element;
-                  mediaControllers.current[asset.id] = element ? new HtmlVideoController(element) : null;
-                }}
-                src={asset.sourceUrl}
-                controls
-                playsInline
-                preload="metadata"
-                onLoadedMetadata={(event) => {
-                  const video = event.currentTarget;
-                  updateAsset(asset.id, { duration: video.duration, width: video.videoWidth, height: video.videoHeight });
-                }}
-                onTimeUpdate={(event) => {
-                  if (asset.id === assets[0]?.id) setGlobalTime(event.currentTarget.currentTime);
-                }}
-                onPlay={() => setIsPlaying(true)}
-                onPause={() => setIsPlaying(false)}
-                onError={() => updateAsset(asset.id, { playbackError: "WebView2 could not decode this file." })}
-              />
-              <div className="metadata">
-                <span>{asset.width > 0 ? `${asset.width}×${asset.height}` : "Reading dimensions…"}</span>
-                <span>{formatSeconds(asset.duration)}</span>
-                <span>{asset.timing?.cfr ? `${asset.timing.frameDurationSeconds?.toFixed(4)} s/frame CFR` : asset.timingError ? "Timing unknown" : "Reading timing…"}</span>
-              </div>
-              {asset.playbackError && <p className="error">{asset.playbackError}</p>}
-              {asset.timingError && <p className="warning">Playable status is independent; exact timing is unavailable for this file.</p>}
-              <button type="button" onClick={() => void capture(asset)} disabled={asset.width === 0}>Capture native PNG</button>
-            </article>
-          ))
-        )}
-      </section>
-
-      <section className="measurement-panel" aria-label="Drift measurement">
-        <div>
-          <p className="eyebrow">PHASE 0 SPIKE</p>
-          <h2>Three-video drift measurement</h2>
-          <p>Samples every {SAMPLE_INTERVAL_MS} ms against Camera 1 as the master. Aggregate statistics include slave streams only.</p>
-        </div>
-        <div className="measurement-actions">
-          <button type="button" onClick={() => setIsMeasuring((current) => !current)} disabled={assets.length < 3}>
-            {isMeasuring ? "Stop measurement" : "Start measurement"}
-          </button>
-          <button type="button" onClick={resetMeasurement} disabled={driftSummary.sampleCount === 0}>Reset</button>
-        </div>
-        <dl className="metrics">
-          <div><dt>Samples</dt><dd>{driftSummary.sampleCount}</dd></div>
-          <div><dt>Median |error|</dt><dd>{formatSeconds(driftSummary.medianAbsoluteError)}</dd></div>
-          <div><dt>P95 |error|</dt><dd>{formatSeconds(driftSummary.p95AbsoluteError)}</dd></div>
-          <div><dt>Max |error|</dt><dd>{formatSeconds(driftSummary.maxAbsoluteError)}</dd></div>
-        </dl>
-      </section>
+      <MeasurementPanel
+        isMeasuring={isMeasuring}
+        onReset={() => {
+          measurementBaseline.current = null;
+          recorder.current.reset();
+          setDriftSummary(recorder.current.summary());
+          setIsMeasuring(false);
+        }}
+        onToggle={toggleMeasurement}
+        sampleIntervalMs={SAMPLE_INTERVAL_MS}
+        summary={driftSummary}
+        videoCount={assets.length}
+      />
     </main>
   );
 }

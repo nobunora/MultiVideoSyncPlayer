@@ -1,11 +1,46 @@
 import { describe, expect, it } from "vitest";
 import {
+  applyMeasurementBaseline,
+  createMeasurementBaseline,
   createDriftSamples,
   createSlaveDriftSamples,
   summarizeDrift,
 } from "./drift-measurement";
 
 describe("drift measurement", () => {
+  it("freezes non-zero starting offsets so the initial aligned state has no drift", () => {
+    const baseline = createMeasurementBaseline(12, [
+      { id: "camera-a", actualLocalTime: 12 },
+      { id: "camera-b", actualLocalTime: 10.5 },
+      { id: "camera-c", actualLocalTime: 11.25 },
+    ]);
+    const initialSamples = createSlaveDriftSamples(
+      0,
+      12,
+      "camera-a",
+      applyMeasurementBaseline(baseline, [
+        { id: "camera-a", actualLocalTime: 12 },
+        { id: "camera-b", actualLocalTime: 10.5 },
+        { id: "camera-c", actualLocalTime: 11.25 },
+      ]),
+    );
+
+    expect(baseline.offsets).toEqual({ "camera-a": 0, "camera-b": 1.5, "camera-c": 0.75 });
+    expect(summarizeDrift(initialSamples).maxAbsoluteError).toBe(0);
+
+    const laterSamples = createSlaveDriftSamples(
+      250,
+      12.25,
+      "camera-a",
+      applyMeasurementBaseline(baseline, [
+        { id: "camera-a", actualLocalTime: 12.25 },
+        { id: "camera-b", actualLocalTime: 10.73 },
+        { id: "camera-c", actualLocalTime: 11.48 },
+      ]),
+    );
+    expect(summarizeDrift(laterSamples).maxAbsoluteError).toBeCloseTo(0.02);
+  });
+
   it("maps global time to expected local time using the frozen offset sign", () => {
     const [sample] = createDriftSamples(250, 12, [
       { id: "camera-a", offsetSeconds: 2, actualLocalTime: 10.25 },

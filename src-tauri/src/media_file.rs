@@ -33,8 +33,8 @@ pub(crate) struct Mp4TimingInfo {
 
 fn canonical_mp4_path(path: &str) -> Result<PathBuf, String> {
     let candidate = Path::new(path);
-    let canonical =
-        fs::canonicalize(candidate).map_err(|error| format!("Cannot access video path: {error}"))?;
+    let canonical = fs::canonicalize(candidate)
+        .map_err(|error| format!("Cannot access video path: {error}"))?;
     let metadata =
         fs::metadata(&canonical).map_err(|error| format!("Cannot stat video path: {error}"))?;
     if !metadata.is_file() {

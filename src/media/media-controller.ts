@@ -5,6 +5,7 @@ export interface MediaController {
   play(): Promise<void>;
   pause(): void;
   isPaused(): boolean;
+  isSeeking?(): boolean;
 }
 
 export class HtmlVideoController implements MediaController {
@@ -28,7 +29,7 @@ export class HtmlVideoController implements MediaController {
       0,
       Number.isFinite(duration) ? Math.min(time, duration) : time,
     );
-    if (Math.abs(this.video.currentTime - target) < 0.0005) {
+    if (Math.abs(this.video.currentTime - target) < 0.0005 && !this.video.seeking) {
       return Promise.resolve();
     }
 
@@ -62,5 +63,9 @@ export class HtmlVideoController implements MediaController {
 
   isPaused(): boolean {
     return this.video.paused;
+  }
+
+  isSeeking(): boolean {
+    return this.video.seeking;
   }
 }

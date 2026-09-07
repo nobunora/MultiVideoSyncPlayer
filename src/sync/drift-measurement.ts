@@ -20,6 +20,40 @@ export interface MeasurementVideo {
   actualLocalTime: number;
 }
 
+export interface MeasurementReading {
+  id: string;
+  actualLocalTime: number;
+}
+
+export interface MeasurementBaseline {
+  globalTime: number;
+  videoIds: string[];
+  offsets: Record<string, number>;
+}
+
+export function createMeasurementBaseline(
+  globalTime: number,
+  readings: MeasurementReading[],
+): MeasurementBaseline {
+  return {
+    globalTime,
+    videoIds: readings.map((reading) => reading.id),
+    offsets: Object.fromEntries(
+      readings.map((reading) => [reading.id, globalTime - reading.actualLocalTime]),
+    ),
+  };
+}
+
+export function applyMeasurementBaseline(
+  baseline: MeasurementBaseline,
+  readings: MeasurementReading[],
+): MeasurementVideo[] {
+  return readings.map((reading) => ({
+    ...reading,
+    offsetSeconds: baseline.offsets[reading.id] ?? 0,
+  }));
+}
+
 export function createDriftSamples(
   sampleTimeMs: number,
   globalTime: number,

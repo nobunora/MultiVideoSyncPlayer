@@ -1,47 +1,23 @@
-import { convertFileSrc, invoke } from "@tauri-apps/api/core";
-import { open } from "@tauri-apps/plugin-dialog";
+import {
+  inspectLocalMp4Timing,
+  prepareLocalVideoFile,
+  selectLocalVideoPaths,
+  type PlatformMp4TimingInfo,
+  type PlatformPreparedVideoFile,
+} from "../platform/tauri-media";
 
-export interface PreparedVideoFile {
-  path: string;
-  fileName: string;
-  sizeBytes: number;
-  sourceUrl: string;
-}
+export type PreparedVideoFile = PlatformPreparedVideoFile;
 
-export interface Mp4TimingInfo {
-  videoTrackCount: number;
-  codec: string;
-  durationSeconds: number;
-  timescale: number;
-  sampleCount: number;
-  frameDurationSeconds: number | null;
-  cfr: boolean;
-  timingSource: "shiguredo_mp4";
-}
+export type Mp4TimingInfo = PlatformMp4TimingInfo;
 
 export async function selectVideoPaths(): Promise<string[]> {
-  const selected = await open({
-    multiple: true,
-    directory: false,
-    filters: [{ name: "MP4 video", extensions: ["mp4"] }],
-  });
-
-  if (!selected) return [];
-  return Array.isArray(selected) ? selected : [selected];
+  return selectLocalVideoPaths();
 }
 
 export async function prepareVideoFile(path: string): Promise<PreparedVideoFile> {
-  const info = await invoke<Omit<PreparedVideoFile, "sourceUrl">>(
-    "prepare_video_file",
-    { path },
-  );
-
-  return {
-    ...info,
-    sourceUrl: convertFileSrc(info.path, "asset"),
-  };
+  return prepareLocalVideoFile(path);
 }
 
 export function inspectMp4Timing(path: string): Promise<Mp4TimingInfo> {
-  return invoke<Mp4TimingInfo>("inspect_mp4_timing", { path });
+  return inspectLocalMp4Timing(path);
 }

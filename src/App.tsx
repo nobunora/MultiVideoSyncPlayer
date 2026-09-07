@@ -127,9 +127,16 @@ function App() {
       activeBaseline = null;
     }
 
-    const masterController = mediaControllers.current[assets[0]?.id ?? ""];
-    const masterTime = masterController?.getCurrentTime() ?? globalTime;
-    if (activeBaseline && assets.some((asset) => !Number.isFinite(activeBaseline?.offsets[asset.id]))) {
+    const master = assets[0];
+    const masterController = master ? mediaControllers.current[master.id] : null;
+    if (!masterController) {
+      setIsPlaying(false);
+      setMessage("Wait until the master video element is ready before synchronized playback.");
+      return;
+    }
+    const masterTime = masterController.getCurrentTime();
+
+    if (activeBaseline && assets.some((asset) => !Number.isFinite(activeBaseline.offsets[asset.id]))) {
       measurementBaseline.current = null;
       recorder.current.reset();
       setDriftSummary(recorder.current.summary());
@@ -137,6 +144,7 @@ function App() {
       setMessage("Measurement baseline reset because an active participant has no frozen offset.");
       activeBaseline = null;
     }
+
     const participants = assets.flatMap((asset) => {
       const controller = mediaControllers.current[asset.id];
       if (!controller) return [];
@@ -146,21 +154,21 @@ function App() {
         targetTime: activeBaseline ? masterTime - activeBaseline.offsets[asset.id] : masterTime,
       }];
     });
-    if (participants.length === 0) {
+    if (participants.length !== assets.length) {
       setIsPlaying(false);
-      setMessage("No video elements are ready to play.");
+      setMessage("Wait until every loaded video element is ready before synchronized playback.");
       return;
     }
 
     try {
-      await startSynchronizedPlayback(participants, masterTime, PRE_PLAY_SEEK_TOLERANCE_SECONDS);
+      await startSynchronizedPlayback(participants, PRE_PLAY_SEEK_TOLERANCE_SECONDS);
       setIsPlaying(true);
       setMessage("Playback started on the local video elements.");
     } catch (error) {
       setIsPlaying(false);
       setMessage(error instanceof Error ? error.message : "Synchronized playback could not start.");
     }
-  }, [assets, globalTime]);
+  }, [assets]);
 
   const seekAll = useCallback((target: number) => {
     setGlobalTime(target);

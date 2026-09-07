@@ -48,9 +48,9 @@ This document records the bounded first implementation cut described in `.codex/
 
 ## Synthetic MP4 timing spike
 
-Fixture: `tmp/phase0/synthetic-30fps-6c9a3e8.mp4`, generated with `scripts/generate-test-video.ps1` and FFmpeg 8.1.1 Essentials. The fixture is ignored and is not committed.
+Fixture: `tmp/phase0/synthetic-30fps-6c9a3e8.mp4`, generated with `scripts/generate-test-video.ps1` and FFmpeg 8.1.1 Essentials. The fixture is ignored and is not committed. Parser evidence remains valid because `6141baf` changes only TypeScript mapping/orchestration.
 
-Current latest correctness-hardening result (`6c9a3e8`):
+Current latest correctness/usability result (`6141baf`):
 
 ```text
 video_track_count: 1
@@ -62,16 +62,17 @@ frame_duration_seconds: 0.03333333333333333
 cfr: true
 ```
 
-The fixture was regenerated on Windows for the `6c9a3e8` source head with a distinct ignored output path and parsed through the targeted Rust test with `MVSP_PHASE0_FIXTURE`. The parser is fed only requested ranges. A hard per-request safety limit of 64 MiB rejects an unbounded or oversized `RequiredInput` instead of allocating the remaining multi-GB file.
+The fixture was regenerated on Windows for the previous `6c9a3e8` source head with a distinct ignored output path and parsed through the targeted Rust test with `MVSP_PHASE0_FIXTURE`. The parser is fed only requested ranges. A hard per-request safety limit of 64 MiB rejects an unbounded or oversized `RequiredInput` instead of allocating the remaining multi-GB file. The parser/media path is unchanged in `6141baf`, so this evidence is reused as instructed by the review.
 
 ## Capture and drift evidence
 
 - The Canvas unit test verifies that output dimensions use source video dimensions rather than displayed CSS size. Native WebView2 capture and saved-PNG dimension verification remain manual acceptance checks.
 - Drift measurement freezes `offset[i] = G - L[i]` at measurement start and preserves that baseline across Pause/Resume.
-- Any global seek invalidates an existing measurement baseline even when measurement sampling is paused; the next Start creates a fresh baseline instead of silently reusing stale offsets.
+- Global Seek pauses drift sampling but preserves an existing valid measurement baseline; Resume reuses the same alignment after the seek. Participant-set changes still clear the baseline and require a fresh Start.
 - Participant-set changes and missing offsets fail closed. Paused-master intervals are not recorded.
 - Drift recording reuses the shared slave-sample mapping helper instead of duplicating global/local error math in `App.tsx`.
 - Synchronized play uses an explicit `targetTime` for every participant. When a measurement baseline exists, orchestration supplies `G - offset[i]`; without a baseline it supplies the same current master time to each participant.
+- Global Seek uses the same pure `local = global - offset[i]` mapping as Play all. For the regression alignment A=12, B=10.5, C=11.25, global 20 maps to A=20, B=18.5, C=19.25; mismatched baseline participants fail closed.
 - Synchronized start and Global Seek now share fail-closed participant target preflight. Global Seek requires every loaded controller, validates every target before any participant moves, and does not silently skip an unready video.
 - Negative or finite-duration-overrun targets are rejected instead of being clamped to an incorrect frame.
 - Synchronized playback requires all loaded video elements to have controllers before starting; it does not silently start only a ready subset.
@@ -96,9 +97,9 @@ WebView2 runtime present
 FFmpeg 8.1.1 Essentials (developer fixture generation only)
 ```
 
-## Verification status after Global Seek and unsettled-seek hardening
+## Verification status after baseline-preserving Global Seek
 
-The previous `fbd7b9e` results recorded in `675ef1f` were treated as historical. The complete verification set was rerun on source head `6c9a3e8` after the Global Seek, unsettled-seek, participant-set, playback-state, and capture hardening.
+The previous `6c9a3e8` results recorded in `6ff97ba` were treated as historical. The relevant focused and complete verification sets were rerun on source head `6141baf` after baseline-aware Global Seek mapping was added.
 
 Run on Windows from the repository root:
 
@@ -115,12 +116,14 @@ npm run tauri dev
 npm run tauri build
 ```
 
-Current results on `6c9a3e8`: focused media/coordinator/capture suites passed (14 tests), the full TypeScript suite passed (20 tests), 7 Rust tests passed, typecheck/lint/build/fmt/clippy passed, Tauri dev reached Vite ready and Rust debug application launch, and `npm run tauri build` produced both MSI and NSIS installers:
+Current results on `6141baf`: focused drift/synchronized-playback suites passed (17 tests), the full TypeScript suite passed (22 tests), 7 Rust tests passed, typecheck/lint/build/fmt/clippy passed, Tauri dev reached Vite ready and Rust debug application launch, and `npm run tauri build` produced both MSI and NSIS installers:
 
 - `src-tauri/target/release/bundle/msi/MultiVideoSyncPlayer_0.1.0_x64_en-US.msi`
 - `src-tauri/target/release/bundle/nsis/MultiVideoSyncPlayer_0.1.0_x64-setup.exe`
 
-The regenerated fixture parsed as `avc1`, 3.0 seconds, timescale 15360, 90 samples, 0.03333333333333333 seconds/frame, CFR. The Rust test run emitted only the existing non-fatal Windows linker stdout warning. No CI/status checks are published for this repository.
+The reused fixture evidence is `avc1`, 3.0 seconds, timescale 15360, 90 samples, 0.03333333333333333 seconds/frame, CFR. The Rust test run emitted only the existing non-fatal Windows linker stdout warning. No CI/status checks are published for this repository.
+
+Quick-use gate: **BLOCKED by interactive-environment limitation, not by an observed product failure.** Tauri dev launched successfully, but this session cannot operate and observe the native picker/WebView2 window to complete the three-file workflow. Therefore no manual before/after local timestamps or PNG result is claimed.
 
 The fixture command used for this run was:
 
@@ -135,7 +138,7 @@ Manual acceptance delegated to Windows remains:
 - native multi-file selection and WebView2 decoding;
 - no full-file copy and no source modification (record source size/mtime, optionally hash);
 - three-camera start/pause/resume with non-zero baseline offsets preserved;
-- pause measurement, perform a global seek, then verify Resume is no longer offered and a new baseline is created on Start;
+- start measurement with deliberately different local positions (for example A=12, B=10.5, C=11.25), perform Global Seek to G=20, and verify the targets become A=20, B=18.5, C=19.25 while Resume remains available;
 - independently play one video and verify `Play all` remains available until all loaded videos are actually playing;
 - attempt measurement Start/Resume while Global Seek or a native seek is pending and verify no baseline is created/resumed;
 - add a video while existing participants are playing and verify playback pauses, the baseline clears, and app-wide state becomes not-playing;

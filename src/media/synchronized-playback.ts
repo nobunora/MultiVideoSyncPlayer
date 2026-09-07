@@ -3,7 +3,7 @@ import type { MediaController } from "./media-controller";
 export interface PlaybackParticipant {
   id: string;
   controller: MediaController;
-  targetTime?: number;
+  targetTime: number;
 }
 
 function failedOperationMessage(operation: "seek" | "play"): Error {
@@ -16,16 +16,14 @@ function failedOperationMessage(operation: "seek" | "play"): Error {
 
 export async function startSynchronizedPlayback(
   participants: PlaybackParticipant[],
-  commonTargetTime: number,
   toleranceSeconds: number,
 ): Promise<void> {
-  if (!Number.isFinite(commonTargetTime)) {
-    throw new Error("Playback target must be finite.");
+  if (!Number.isFinite(toleranceSeconds) || toleranceSeconds < 0) {
+    throw new Error("Playback seek tolerance must be a finite non-negative value.");
   }
 
   const seekResults = await Promise.allSettled(
-    participants.map(async ({ controller, targetTime: participantTargetTime }) => {
-      const targetTime = participantTargetTime ?? commonTargetTime;
+    participants.map(async ({ controller, targetTime }) => {
       if (!Number.isFinite(targetTime)) {
         throw new Error("Playback target must be finite.");
       }
